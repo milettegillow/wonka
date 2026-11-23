@@ -5,6 +5,7 @@ import { W, H, rect, ellipse, seg, ease, lerp, randInt, chance, shake, sparkle, 
 import { drawKid } from '../kids.js';
 import { drawTicket } from '../chocroom.js';
 import { MicroGame } from './base.js';
+import { sfx } from '../audio.js';
 
 const COUNTER_Y = 180; // bars stand on this line
 const BAR_W = 28, BAR_H = 44;
@@ -37,7 +38,7 @@ function buildBg() {
     }
   }
   // window on the left with snow (it's winter in the book)
-  r(10, 20, 72, 90, P.ink); r(14, 24, 64, 82, '#9fc4ff');
+  r(10, 20, 72, 90, P.ink); r(14, 24, 64, 82, P.lilac3);
   r(14, 90, 64, 16, P.white);
   r(44, 24, 4, 82, P.ink); r(14, 62, 64, 4, P.ink);
   r(6, 108, 80, 6, P.wood1);
@@ -105,19 +106,21 @@ function drawBar(ctx, x, bottom, o = {}) {
 }
 
 export class CharlieGame extends MicroGame {
-  static meta = { kid: 'charlie', room: 'The Sweetshop', command: 'Find it!' };
+  static meta = { kid: 'charlie', room: 'The Sweetshop', command: 'Find it!', line: 'Follow the ticket, then tap its bar', input: 'tap' };
 
   init(d) {
     super.init(d);
-    const L = this.loop;
-    if (L <= 1) Object.assign(this, { n: 3, swaps: 3, swapDur: 0.52, fake: 0, pickTime: 3.0 });
-    else if (L === 2) Object.assign(this, { n: 4, swaps: 5, swapDur: 0.4, fake: 0, pickTime: 2.6 });
-    else Object.assign(this, { n: 5, swaps: Math.min(12, 5 + L), swapDur: Math.max(0.2, 0.34 - 0.03 * (L - 3)), fake: Math.min(0.35, 0.15 + 0.05 * (L - 3)), pickTime: 2.4 });
-    this.gap = 0.06;
+    // level 1: three bars, two lazy swaps. level 5: five bars, quick swaps, fake-outs.
+    this.n = this.lv([3, 3, 4, 4, 5]);
+    this.swaps = this.lv([2, 3, 5, 7, 9]);
+    this.swapDur = this.lv([0.9, 0.7, 0.5, 0.36, 0.28]);
+    this.fake = this.lv([0, 0, 0.1, 0.18, 0.25]);
+    this.pickTime = this.lv([4.5, 4, 3.4, 3, 2.6]);
+    this.gap = this.lv([0.18, 0.14, 0.1, 0.07, 0.06]);
     this.slotX = Array.from({ length: this.n }, (_, i) => 130 + (i + 0.5) * (330 / this.n));
     this.bars = Array.from({ length: this.n }, (_, i) => ({ slot: i, x: this.slotX[i], y: 0, s: 1, front: 0 }));
     this.ticketBar = randInt(0, this.n - 1);
-    this.showDur = 1.25;
+    this.showDur = 1.35;
     // build the swap schedule
     this.plan = [];
     let tt = this.showDur;
@@ -141,7 +144,11 @@ export class CharlieGame extends MicroGame {
   update(dt) {
     this.tick(dt);
     const t = this.t;
-    if (this.phase === 'show' && t >= this.showDur) this.phase = 'shuffle';
+    if (this.phase === 'show') {
+      if (!this.snd1 && t > 0.05) { this.snd1 = true; sfx('sparkle'); }
+      if (!this.snd2 && t > 0.8) { this.snd2 = true; sfx('rustle'); }
+      if (t >= this.showDur) this.phase = 'shuffle';
+    }
     if (this.phase === 'shuffle') {
       for (const sw of this.plan) {
         if (t < sw.t0 || sw.done) continue;
@@ -154,6 +161,7 @@ export class CharlieGame extends MicroGame {
           sw.A = this.barAtSlot(a); sw.B = this.barAtSlot(b);
           sw.xa = this.slotX[a]; sw.xb = this.slotX[b];
           sw.sa = a; sw.sb = b;
+          sfx('swap');
         }
         const k = Math.min(1, (t - sw.t0) / this.swapDur);
         let e = ease.inOutQuad(k);
@@ -174,7 +182,7 @@ export class CharlieGame extends MicroGame {
     }
     if (this.phase === 'pick' && input.type === 'mouse') this.hover = this.hit(input.x, input.y);
     if (this.result === 'win' && Math.random() < 0.5) {
-      this.parts.add({ x: this.ticketPos.x + (Math.random() - 0.5) * 50, y: this.ticketPos.y + (Math.random() - 0.5) * 30, shape: 'spark', size: 3, color: '#fff6c0', life: 0.4 });
+      this.parts.add({ x: this.ticketPos.x + (Math.random() - 0.5) * 50, y: this.ticketPos.y + (Math.random() - 0.5) * 30, shape: 'spark', size: 3, color: P.gold3, life: 0.4 });
     }
   }
 
@@ -197,14 +205,22 @@ export class CharlieGame extends MicroGame {
     this.phase = 'reveal';
     this.revealT = this.t;
     const b = this.bars[i];
+    sfx('rustle');
     if (i === this.ticketBar) {
+      setTimeout(() => sfx('sparkle'), 200);
       this.ticketPos = { x: b.x, y: 70 };
       this.win();
       this.parts.burst(b.x, COUNTER_Y - 40, 40, { colors: GOLDS, speed: [60, 200], g: 160, life: [0.5, 1.0], size: [1, 3] });
     } else {
       this.fail();
+      sfx('miss');
       this.parts.burst(b.x, COUNTER_Y - 30, 10, { colors: [P.choc3, P.choc4], speed: [30, 80], g: 200 });
     }
+  }
+
+  onWin() {
+    if (this.picked < 0) { this.picked = this.ticketBar; this.phase = 'reveal'; this.revealT = this.t; }
+    this.ticketPos = this.ticketPos || { x: this.bars[this.picked].x, y: 70 };
   }
 
   onTimeout() {

@@ -5,6 +5,7 @@ import { W, H, rect, ellipse, circle, ringPx, seg, ease, lerp, chance, shake, fl
 import { drawKid, drawOompa } from '../kids.js';
 import { drawHead } from '../faces.js';
 import { MicroGame } from './base.js';
+import { sfx } from '../audio.js';
 
 const VX = 70, FEET = 236;
 const HX = 110, HY = 201; // hit zone (at Violet's mouth)
@@ -52,7 +53,7 @@ function buildBg() {
   r(398, 60, 80, 160, P.ink);
   r(400, 62, 76, 156, P.grey2);
   r(400, 62, 76, 6, P.grey3);
-  r(406, 76, 64, 36, P.ink); r(408, 78, 60, 32, '#9fd9ff');
+  r(406, 76, 64, 36, P.ink); r(408, 78, 60, 32, P.lilac3);
   for (let i = 0; i < 5; i++) r(412 + i * 11, 90 + (i % 2) * 4, 7, 7, CANDY[i]);
   for (let i = 0; i < 4; i++) { e(414 + i * 16, 126, 5, 5, P.ink); e(414 + i * 16, 126, 4, 4, P.cream); }
   r(404, 140, 70, 4, P.grey1);
@@ -86,29 +87,31 @@ function drawNote(ctx, n, x, y, at) {
 }
 
 export class VioletGame extends MicroGame {
-  static meta = { kid: 'violet', room: 'Inventing Room', command: 'Chew!' };
+  static meta = { kid: 'violet', room: 'Inventing Room', command: 'Chew!', line: 'Tap on the chomps, skip the blueberries', input: 'tap' };
 
   init(d) {
     super.init(d);
-    const L = this.loop;
-    const bpm = Math.min(160, 100 + 16 * (L - 1));
+    const L = this.level;
+    const bpm = this.lv([88, 100, 114, 130, 148]);
     this.beat = 60 / bpm;
-    this.travel = Math.max(1.1, 1.6 - 0.15 * (L - 1));
-    const nNotes = Math.min(15, 7 + L + (L > 2 ? 1 : 0));
-    const blueFrac = Math.min(0.42, 0.22 + 0.06 * (L - 1));
+    this.travel = this.lv([2.2, 1.9, 1.6, 1.4, 1.2]);
+    const nNotes = this.lv([7, 8, 10, 11, 12]);
+    const blueFrac = this.lv([0.2, 0.25, 0.3, 0.34, 0.38]);
     const nBlue = Math.max(3, Math.round(nNotes * blueFrac));
-    this.perfectW = 0.06;
-    this.goodW = 0.14;
+    this.perfectW = 0.07;
+    this.goodW = this.lv([0.18, 0.16, 0.15, 0.14, 0.13]);
     // choose which notes are blueberries (never the first two, no triples)
     const types = Array(nNotes).fill('chomp');
     let placed = 0, guard = 0;
     while (placed < nBlue && guard++ < 500) {
       const i = 2 + Math.floor(Math.random() * (nNotes - 2));
       if (types[i] === 'blue') continue;
-      if (L <= 1 && (types[i - 1] === 'blue' || types[i + 1] === 'blue')) continue;
+      if (L <= 2 && (types[i - 1] === 'blue' || types[i + 1] === 'blue')) continue;
       if (types[i - 1] === 'blue' && types[i - 2] === 'blue') continue;
       types[i] = 'blue'; placed++;
     }
+    // if the spacing rules boxed us in, drop the remaining berries anywhere legal
+    for (let i = nNotes - 1; i >= 2 && placed < nBlue; i--) if (types[i] === 'chomp') { types[i] = 'blue'; placed++; }
     this.notes = [];
     let tt = this.travel + 0.35;
     for (let i = 0; i < nNotes; i++) {
@@ -149,6 +152,7 @@ export class VioletGame extends MicroGame {
           n.vx = -140;
           if (n.type === 'chomp') {
             this.misses++;
+            sfx('miss');
             this.parts.burst(HX, HY, 8, { colors: [P.grey2, P.grey3, P.white], speed: [20, 60], shape: 'puff', size: [2, 4], life: [0.3, 0.5] });
             this.popups.push({ s: 'Miss', x: HX + 10, y: HY - 26, t: 0, c: P.grey1 });
             shake(2, 0.12);
@@ -166,6 +170,8 @@ export class VioletGame extends MicroGame {
     if (this.result) return;
     this.chompT = 0;
     let best = null, bd = 1e9;
+    const anyClose = this.notes.some((n) => n.state === 'live' && Math.abs(n.hit - this.t) <= this.goodW);
+    if (!anyClose) sfx('chomp');
     for (const n of this.notes) {
       if (n.state !== 'live') continue;
       const d = Math.abs(n.hit - this.t);
@@ -175,11 +181,13 @@ export class VioletGame extends MicroGame {
     best.state = 'eaten';
     if (best.type === 'chomp') {
       const perfect = bd <= this.perfectW;
+      sfx(perfect ? 'perfect' : 'chomp');
       this.parts.burst(HX, HY, perfect ? 16 : 8, { colors: perfect ? [P.pink1, P.pink2, P.white, P.lemon2] : [P.pink2, P.pink3], speed: [40, 120], shape: 'spark', size: [2, 3], life: [0.25, 0.5] });
       this.popups.push({ s: perfect ? 'Perfect' : 'Good', x: HX + 12, y: HY - 26, t: 0, c: perfect ? P.lemon1 : P.mint1 });
       this.pulse = 1;
     } else {
       this.blues++;
+      sfx('squelch');
       this.parts.burst(HX, HY, 12, { colors: [P.berry1, P.berry2, P.blue2], speed: [40, 110], life: [0.3, 0.6], g: 200 });
       this.popups.push({ s: 'Blue!', x: HX + 12, y: HY - 26, t: 0, c: P.blue2 });
       flash(P.berry2, 0.12);
@@ -193,10 +201,10 @@ export class VioletGame extends MicroGame {
   }
 
   onWin() {
-    this.outDur = 1.6;
+    this.outDur = 2.0;
     this.parts.burst(VX, FEET - 60, 24, { colors: CANDY, speed: [60, 160], g: 220, life: [0.6, 1] });
   }
-  onFail() { this.outDur = 2.3; }
+  onFail() { this.outDur = 2.4; sfx('squelch'); setTimeout(() => sfx('squelch'), 250); }
 
   draw(ctx) {
     if (!bg) bg = buildBg();
@@ -264,6 +272,7 @@ export class VioletGame extends MicroGame {
           circle(ctx, VX + 10 + k * 6, FEET - 42 - k * 10, r * 0.3, P.pink4);
         } else if (!this.popped) {
           this.popped = true;
+          sfx('bubble');
           this.parts.burst(VX + 24, FEET - 41, 30, { colors: [P.pink1, P.pink2, P.pink3], speed: [80, 200], g: 300, life: [0.4, 0.8], size: [2, 4] });
           shake(3, 0.15);
         }
@@ -273,12 +282,12 @@ export class VioletGame extends MicroGame {
     // mini HUD: gum lives + blueberry count
     for (let i = 0; i < 3; i++) {
       const missed = i < this.misses;
-      circle(ctx, 16 + i * 16, 16, 6, P.ink);
-      circle(ctx, 16 + i * 16, 16, 5, missed ? P.grey2 : P.pink1);
-      if (!missed) rect(ctx, 13 + i * 16, 13, 2, 2, P.white);
+      circle(ctx, 16 + i * 16, 38, 6, P.ink);
+      circle(ctx, 16 + i * 16, 38, 5, missed ? P.grey2 : P.pink1);
+      if (!missed) rect(ctx, 13 + i * 16, 35, 2, 2, P.white);
       const ate = i < this.blues;
-      circle(ctx, 16 + i * 16, 34, 6, P.ink);
-      circle(ctx, 16 + i * 16, 34, 5, ate ? P.berry2 : P.lilac3);
+      circle(ctx, 16 + i * 16, 54, 6, P.ink);
+      circle(ctx, 16 + i * 16, 54, 5, ate ? P.berry2 : P.lilac3);
     }
 
     for (const p of this.popups) {

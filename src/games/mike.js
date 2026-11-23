@@ -5,6 +5,7 @@ import { P, CANDY } from '../palette.js';
 import { W, H, rect, ellipse, circle, seg, ease, lerp, rand, shake, flash, sparkle, input, dist } from '../engine.js';
 import { drawKid } from '../kids.js';
 import { MicroGame } from './base.js';
+import { sfx } from '../audio.js';
 
 const MX = 130, FEET = 238;
 const TVX = 424, TVY = 160; // screen centre
@@ -18,8 +19,8 @@ function buildBg() {
   const g = c.getContext('2d');
   const r = (x, y, w, h, col) => { g.fillStyle = col; g.fillRect(x, y, w, h); };
   // dazzling bright studio
-  r(0, 0, W, H, P.mint3);
-  for (let x = 0; x < W; x += 40) r(x, 0, 20, 200, '#e2fff2');
+  r(0, 0, W, H, P.lilac4);
+  for (let x = 0; x < W; x += 40) r(x, 0, 20, 200, P.pink4);
   r(0, 0, W, 14, P.grey0);
   for (let x = 20; x < W; x += 70) {
     // studio lamps
@@ -36,7 +37,7 @@ function buildBg() {
   r(4, 70, 74, 60, P.ink); r(6, 72, 70, 56, P.grey0); r(6, 72, 70, 6, P.grey1);
   r(10, 82, 30, 20, P.grey1); r(12, 84, 26, 4, P.grey2);
   r(76, 84, 18, 34, P.ink); r(78, 86, 14, 30, P.grey1);
-  r(94, 88, 6, 26, P.ink); r(95, 90, 4, 22, '#6fd0ff'); r(96, 92, 1, 8, P.white);
+  r(94, 88, 6, 26, P.ink); r(95, 90, 4, 22, P.lilac2); r(96, 92, 1, 8, P.white);
   r(26, 54, 22, 18, P.ink); r(28, 56, 18, 14, P.grey1); // viewfinder
   r(34, 130, 10, 60, P.ink); r(36, 130, 6, 60, P.grey1);
   r(14, 188, 50, 6, P.ink); r(16, 189, 46, 4, P.grey1);
@@ -65,7 +66,7 @@ function mikeCells(target) {
   const data = g.getImageData(0, 0, CW, CH).data;
   const isInk = (i) => data[i] < 80 && data[i + 1] < 50 && data[i + 2] < 60;
   let best = null;
-  for (let cs = 14; cs >= 5; cs--) {
+  for (let cs = 20; cs >= 5; cs--) {
     const cells = [];
     for (let y = 0; y < CH; y += cs) for (let x = 0; x < CW; x += cs) {
       let n = 0;
@@ -99,30 +100,31 @@ function mikeCells(target) {
 }
 
 export class MikeGame extends MicroGame {
-  static meta = { kid: 'mike', room: 'Television Room', command: 'Catch!' };
+  static meta = { kid: 'mike', room: 'Television Room', command: 'Catch!', line: 'Tap the flying pixels', input: 'tap' };
 
   init(d) {
     super.init(d);
-    const L = this.loop;
-    const target = Math.min(66, 30 + (L - 1) * 12);
+    const L = this.level;
+    const target = this.lv([16, 26, 36, 46, 50]);
     const { cs, cells, mask } = mikeCells(target);
     this.cs = cs;
     this.mask = mask;
-    const spread = Math.max(1.5, 2.6 - 0.3 * (L - 1));
-    const trav = [Math.max(1.4, 2.6 - 0.35 * (L - 1)), Math.max(2.0, 3.4 - 0.4 * (L - 1))];
-    this.amp = 16 + 8 * (L - 1);
-    this.erratic = L >= 3 ? 1 : 0;
+    const spread = this.lv([3, 2.7, 2.4, 2.0, 1.7]);
+    const trav = [this.lv([3.6, 3.0, 2.4, 1.9, 1.6]), this.lv([4.6, 3.8, 3.2, 2.6, 2.2])];
+    this.amp = this.lv([10, 16, 24, 32, 38]);
+    this.erratic = L >= 4 ? 1 : 0;
+    this.tapR = this.lv([17, 15, 13, 12, 12]);
     this.pix = cells.map((c) => {
       const a = rand(0, Math.PI * 2);
-      const r = rand(16, 60);
+      const r = rand(20, 90);
       const hx = MX + c.x, hy = FEET + c.y;
       return {
         home: { x: hx, y: hy }, col: c.col,
         x: hx, y: hy,
         bx: hx + Math.cos(a) * r + 30, by: Math.min(232, Math.max(50, hy + Math.sin(a) * r * 0.8)),
-        delay: 0.35 + Math.random() * spread,
-        travel: rand(trav[0], trav[1]),
-        waves: rand(1, 1.5 + L * 0.5),
+        delay: 0.35 + Math.random() * spread * 0.6,
+        travel: rand(trav[0], trav[1] + spread * 0.6),
+        waves: rand(1, 1 + L * 0.5),
         ph: rand(0, Math.PI * 2),
         jx: 0, jy: 0, jt: rand(0.2, 0.6),
         s: 0, state: 'burst', k: 0,
@@ -168,10 +170,10 @@ export class MikeGame extends MicroGame {
           p.jx = lerp(p.jx, p.tjx || 0, Math.min(1, dt * 4)); p.jy = lerp(p.jy, p.tjy || 0, Math.min(1, dt * 4));
         }
         if (p.s >= 1) {
-          p.state = 'tv'; p.k = 0; this.lost++; this.tvFlash = 1;
+          p.state = 'tv'; p.k = 0; this.lost++; this.tvFlash = 1; if (!this.result) sfx('zap');
         } else {
           [p.x, p.y] = this.path(p, p.s);
-          if (!this.result && input.down && this.dragging && dist(p.x + this.cs / 2, p.y + this.cs / 2, input.x, input.y) < 12) this.catchPix(p);
+          if (!this.result && input.down && this.dragging && dist(p.x + this.cs / 2, p.y + this.cs / 2, input.x, input.y) < this.tapR - 3) this.catchPix(p);
         }
       } else if (p.state === 'caught') {
         p.k += dt / 0.22;
@@ -190,6 +192,7 @@ export class MikeGame extends MicroGame {
   }
 
   catchPix(p) {
+    sfx('ping', this.caught);
     p.state = 'caught'; p.k = 0; p.cx = p.x; p.cy = p.y;
     this.caught++;
     this.parts.burst(p.x, p.y, 4, { colors: [p.col, P.white], speed: [30, 80], life: [0.15, 0.3], size: [1, 2] });
@@ -199,7 +202,7 @@ export class MikeGame extends MicroGame {
     this.dragging = true;
     let n = 0;
     for (const p of this.pix) if (p.state === 'fly' || p.state === 'wait') {
-      if (dist(p.x + this.cs / 2, p.y + this.cs / 2, x, y) < 14) { this.catchPix(p); n++; }
+      if (dist(p.x + this.cs / 2, p.y + this.cs / 2, x, y) < this.tapR) { this.catchPix(p); n++; }
     }
     if (n) shake(1, 0.05);
     else this.parts.burst(x, y, 5, { colors: [P.white, P.mint2], speed: [20, 50], life: [0.15, 0.25], shape: 'ring', size: [4, 6] });
@@ -213,12 +216,14 @@ export class MikeGame extends MicroGame {
   onTimeout() { this.resolve(); }
 
   onWin() {
-    this.outDur = 1.9;
+    this.outDur = 2.1;
+    setTimeout(() => sfx('cheer'), 300);
     flash(P.white, 0.2);
     this.parts.burst(MX, FEET - 40, 30, { colors: CANDY, speed: [60, 180], g: 200, life: [0.5, 1] });
   }
   onFail() {
     this.outDur = 2.4;
+    sfx('zap'); setTimeout(() => sfx('zap'), 400);
     // what he managed to catch gets sucked in too
     for (const p of this.pix) if (p.state === 'placed' || p.state === 'caught') { p.state = 'suck'; p.k = 0; p.sx = p.x; p.sy = p.y; p.d = Math.random() * 0.3; }
   }
@@ -234,11 +239,11 @@ export class MikeGame extends MicroGame {
     rect(ctx, TVX - 9 + Math.round(Math.sin(at * 2)), TVY - TV_H / 2 - 13, 1, 1, P.ink);
     // screen with static
     const sx = TVX - TV_W / 2, sy = TVY - TV_H / 2;
-    rect(ctx, sx, sy, TV_W, TV_H, '#22304a');
+    rect(ctx, sx, sy, TV_W, TV_H, P.berry0);
     const n = Math.floor(at * 20);
     for (let i = 0; i < 40; i++) {
       const v = ((i * 7919 + n * 104729) % 997) / 997;
-      ctx.fillStyle = v > 0.5 ? 'rgba(255,255,255,0.25)' : 'rgba(150,200,255,0.18)';
+      ctx.fillStyle = v > 0.5 ? 'rgba(255,255,255,0.25)' : 'rgba(225,195,255,0.2)';
       ctx.fillRect(sx + Math.floor(v * TV_W), sy + ((i * 13 + n * 3) % TV_H), 2, 1);
     }
     if (this.tvFlash > 0) { ctx.fillStyle = `rgba(255,255,255,${this.tvFlash * 0.5})`; ctx.fillRect(sx, sy, TV_W, TV_H); }

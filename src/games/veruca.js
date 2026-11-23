@@ -4,6 +4,7 @@ import { P } from '../palette.js';
 import { W, H, rect, ellipse, circle, seg, ease, lerp, rand, chance, shake, sparkle, text, input } from '../engine.js';
 import { drawKid } from '../kids.js';
 import { MicroGame } from './base.js';
+import { sfx } from '../audio.js';
 
 const FEET = 236;
 const START_X = 46;
@@ -102,17 +103,17 @@ function drawSquirrel(ctx, x, y, o = {}) {
 }
 
 export class VerucaGame extends MicroGame {
-  static meta = { kid: 'veruca', room: 'The Nut Room', command: 'Sneak!' };
+  static meta = { kid: 'veruca', room: 'The Nut Room', command: 'Sneak!', line: 'Hold to creep, let go when they look', input: 'hold' };
 
   init(d) {
     super.init(d);
-    const L = this.loop;
-    this.speed_ = 92 + 8 * (L - 1);
-    this.ivl = [Math.max(0.5, 1.3 - 0.25 * (L - 1)), Math.max(1.4, 2.0 - 0.15 * (L - 1))];
-    this.tellDur = Math.max(0.28, 0.7 - 0.14 * (L - 1));
-    this.lookDur = [Math.max(0.6, 0.8 - 0.07 * (L - 1)), 1.1 + 0.08 * (L - 1)];
-    this.fakeChance = L <= 1 ? 0 : Math.min(0.4, 0.15 + 0.08 * (L - 1));
-    this.duration = 8.6 + 0.3 * (L - 1);
+    this.speed_ = this.lv([100, 104, 108, 112, 116]);
+    this.ivl = [this.lv([2.2, 1.6, 1.1, 0.8, 0.55]), this.lv([3.2, 2.6, 2.2, 1.9, 1.6])];
+    this.tellDur = this.lv([1.1, 0.85, 0.6, 0.42, 0.3]);
+    this.lookDur = [this.lv([0.8, 0.75, 0.7, 0.65, 0.6]), this.lv([1.1, 1.2, 1.3, 1.35, 1.4])];
+    this.fakeChance = this.lv([0, 0.12, 0.2, 0.28, 0.35]);
+    this.duration = this.lv([10, 9.8, 9.6, 9.4, 9.4]);
+    this.stepT = 0;
     this.x = START_X;
     this.moving = false;
     this.state = 'work';
@@ -133,9 +134,10 @@ export class VerucaGame extends MicroGame {
       if (this.state === 'work') {
         this.fake = chance(this.fakeChance);
         this.setState('tell', this.tellDur * (this.fake ? rand(0.6, 1) : 1));
+        sfx('squeak');
       } else if (this.state === 'tell') {
         if (this.fake) this.setState('work', rand(this.ivl[0] * 0.6, this.ivl[1] * 0.8));
-        else this.setState('look', rand(this.lookDur[0], this.lookDur[1]));
+        else { this.setState('look', rand(this.lookDur[0], this.lookDur[1])); sfx('warn'); }
       } else if (this.state === 'look') {
         this.setState('work', rand(this.ivl[0], this.ivl[1]));
       }
@@ -148,17 +150,25 @@ export class VerucaGame extends MicroGame {
         return;
       }
       this.x += this.speed_ * dt;
+      this.stepT -= dt;
+      if (this.stepT <= 0) { this.stepT = 0.28; sfx('step'); }
       if (this.at % 0.2 < dt) this.parts.add({ x: this.x - 6, y: FEET, vx: -20, vy: -10, life: 0.3, size: 2, color: P.wood0, shape: 'puff' });
       if (this.x >= GOAL_X) { this.x = GOAL_X; this.win(); }
     }
   }
 
   onWin() {
-    this.outDur = 1.6;
+    this.outDur = 2.0;
+    sfx('squeak'); sfx('cheer');
     shake(2, 0.2);
     this.parts.burst(TARGET_X - 10, 160, 24, { colors: [P.gold1, P.gold2, P.pink2, P.white], speed: [60, 160], g: 200, shape: 'spark', size: [2, 3], life: [0.4, 0.8] });
   }
-  onFail() { this.outDur = 2.7; shake(4, 0.3); }
+  onFail() {
+    this.outDur = 2.7; shake(4, 0.3);
+    sfx('squeak');
+    for (let i = 0; i < 6; i++) setTimeout(() => sfx('knock'), 800 + i * 110);
+    setTimeout(() => sfx('chute'), 1750);
+  }
 
   draw(ctx) {
     if (!bg) bg = buildBg();

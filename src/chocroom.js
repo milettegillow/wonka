@@ -210,9 +210,10 @@ export function drawChocRoom(ctx, t, o = {}) {
       const k = y / bottom;
       const x = Math.round(p.x + sway * k * k);
       ctx.fillStyle = P.glass; ctx.fillRect(x, y, p.w, 1);
-      // chocolate slugs travelling up
-      const phase = (y + t * 60 + p.ph * 20) % 22;
-      if (phase < 12) { ctx.fillStyle = phase < 2 ? P.choc4 : P.choc2; ctx.fillRect(x + 2, y, p.w - 4, 1); }
+      // chocolate rushing up the middle, with lighter streaks
+      ctx.fillStyle = P.choc2; ctx.fillRect(x + 2, y, p.w - 4, 1);
+      const phase = (y + t * 60 + p.ph * 20) % 14;
+      if (phase < 2) { ctx.fillStyle = P.choc4; ctx.fillRect(x + 2, y, Math.max(1, p.w - 6), 1); }
       ctx.fillStyle = P.glassEdge;
       ctx.fillRect(x, y, 1, 1); ctx.fillRect(x + p.w - 1, y, 1, 1);
       if (y % 7 < 3) ctx.fillRect(x + 2, y, 1, 1);
