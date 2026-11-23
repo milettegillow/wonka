@@ -1,0 +1,142 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>WonkaWare faces</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 10 6%22 shape-rendering=%22crispEdges%22%3E%3Crect width=%2210%22 height=%226%22 fill=%22%232a1216%22/%3E%3Crect x=%221%22 y=%221%22 width=%228%22 height=%224%22 fill=%22%23ffbe1a%22/%3E%3Crect x=%222%22 y=%223%22 width=%225%22 height=%221%22 fill=%22%23a86d00%22/%3E%3C/svg%3E">
+  <link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&display=block" rel="stylesheet">
+  <style>
+    body { margin: 0; padding: 24px; background: #2b140c; color: #fff4dc; font-family: "Press Start 2P", monospace; font-size: 10px; }
+    h1 { font-size: 16px; color: #ffd23a; margin: 0 0 16px; }
+    .kid { background: #46220f; border: 3px solid #ff3f8e; border-radius: 6px; padding: 14px; margin-bottom: 18px; }
+    .kid h2 { font-size: 12px; margin: 0 0 10px; color: #86f0c6; }
+    .row { display: flex; flex-wrap: wrap; gap: 14px; align-items: flex-start; }
+    .cell { display: flex; flex-direction: column; gap: 6px; align-items: center; }
+    .cell span { color: #ffc3df; font-size: 8px; }
+    canvas { image-rendering: pixelated; background: repeating-conic-gradient(#ddd0ff 0 25%, #f0eaff 0 50%) 0 0 / 16px 16px; border: 2px solid #1a0b10; }
+    .ctl { display: flex; gap: 12px; align-items: center; margin-bottom: 10px; }
+    input[type=range] { width: 220px; }
+    .missing { width: 256px; height: 256px; display: flex; align-items: center; justify-content: center; border: 2px dashed #86491f; color: #a8662f; text-align: center; line-height: 1.6; }
+    textarea { width: 100%; max-width: 560px; height: 120px; background: #1a0b10; color: #86f0c6; border: 2px solid #ff3f8e; font: 10px monospace; padding: 8px; }
+    .top { display: flex; gap: 18px; align-items: center; margin-bottom: 16px; flex-wrap: wrap; }
+  </style>
+</head>
+<body>
+  <h1>Faces</h1>
+  <div class="top">
+    <label><input type="checkbox" id="anim" checked> Hinge animating</label>
+    <label>Open <input type="range" id="open" min="0" max="1" step="0.01" value="0.6"></label>
+  </div>
+  <div id="kids"></div>
+  <h2 style="font-size:12px;color:#ffd23a">FACE_CONFIG</h2>
+  <textarea id="cfg" readonly></textarea>
+  <script type="module">
+    import { KIDS, FACE_CONFIG, HEAD, loadFaces, getFaces, drawHead, splitRow, rowExtents } from './src/faces.js';
+
+    const faces = await loadFaces('faces/');
+    const root = document.getElementById('kids');
+    const cells = [];
+    const Z = 6; // preview zoom
+
+    function mkCanvas(w, h) {
+      const c = document.createElement('canvas');
+      c.width = w; c.height = h;
+      c.style.width = w * Z + 'px'; c.style.height = h * Z + 'px';
+      return c;
+    }
+
+    for (const kid of KIDS) {
+      const f = faces[kid];
+      const box = document.createElement('div');
+      box.className = 'kid';
+      box.innerHTML = `<h2>${kid}</h2><div class="ctl">mouthY <input type="range" min="0.3" max="0.95" step="0.005" value="${FACE_CONFIG[kid].mouthY}"><b>${FACE_CONFIG[kid].mouthY}</b></div><div class="row"></div>`;
+      const slider = box.querySelector('input');
+      const val = box.querySelector('b');
+      slider.addEventListener('input', () => {
+        FACE_CONFIG[kid].mouthY = parseFloat(slider.value);
+        val.textContent = slider.value;
+        writeCfg();
+      });
+      const row = box.querySelector('.row');
+      const variants = [
+        ['placeholder', 'normal', f.placeholder.normal],
+        ['placeholder', 'scared', f.placeholder.scared],
+        ['real', 'normal', f.real.normal],
+        ['real', 'scared', f.real.scared],
+      ];
+      for (const [src, mood, img] of variants) {
+        const cell = document.createElement('div');
+        cell.className = 'cell';
+        if (!img) {
+          cell.innerHTML = `<div class="missing">no faces/${kid}${mood === 'scared' ? '-scared' : ''}.png</div><span>${src} ${mood}</span>`;
+          row.appendChild(cell);
+          continue;
+        }
+        const still = mkCanvas(HEAD + 8, HEAD + 8);
+        const live = mkCanvas(HEAD + 24, HEAD + 24);
+        cell.appendChild(still); cell.appendChild(live);
+        const label = document.createElement('span');
+        label.textContent = `${src} ${mood}`;
+        cell.appendChild(label);
+        row.appendChild(cell);
+        cells.push({ kid, img, still, live, raw: src === 'real' ? f.raw[mood] : null });
+      }
+      // raw 512 preview with the split line, when a real image exists
+      if (f.raw.normal) {
+        const cell = document.createElement('div');
+        cell.className = 'cell';
+        const c = document.createElement('canvas');
+        c.width = 256; c.height = 256;
+        cell.appendChild(c);
+        const label = document.createElement('span');
+        label.textContent = 'source png';
+        cell.appendChild(label);
+        row.appendChild(cell);
+        cells.push({ kid, rawCanvas: c, raw: f.raw.normal });
+      }
+      root.appendChild(box);
+    }
+
+    function writeCfg() {
+      const lines = KIDS.map((k) => `  ${k}: { mouthY: ${FACE_CONFIG[k].mouthY.toFixed(3)}, maxOpen: ${FACE_CONFIG[k].maxOpen} },`);
+      document.getElementById('cfg').value = `export const FACE_CONFIG = {\n${lines.join('\n')}\n};`;
+    }
+    writeCfg();
+
+    const animBox = document.getElementById('anim');
+    const openSlider = document.getElementById('open');
+    let t0 = performance.now();
+    function frame(now) {
+      const t = (now - t0) / 1000;
+      const open = animBox.checked ? Math.abs(Math.sin(t * 3)) : parseFloat(openSlider.value);
+      for (const c of cells) {
+        const split = splitRow(c.kid);
+        if (c.rawCanvas) {
+          const g = c.rawCanvas.getContext('2d');
+          g.clearRect(0, 0, 256, 256);
+          g.drawImage(c.raw, 0, 0, 256, 256);
+          g.fillStyle = '#ff2050';
+          g.fillRect(0, Math.round(256 * FACE_CONFIG[c.kid].mouthY), 256, 2);
+          continue;
+        }
+        const ext = rowExtents(c.img, Math.max(0, split - 1));
+        let g = c.still.getContext('2d');
+        g.imageSmoothingEnabled = false;
+        g.clearRect(0, 0, c.still.width, c.still.height);
+        g.drawImage(c.img, 4, 4);
+        g.fillStyle = 'rgba(255,32,80,0.9)';
+        g.fillRect(0, 4 + split, c.still.width, 1);
+        g.fillStyle = '#2fd39c';
+        g.fillRect(4 + ext[0], 4 + split - 2, 1, 5);
+        g = c.live.getContext('2d');
+        g.imageSmoothingEnabled = false;
+        g.clearRect(0, 0, c.live.width, c.live.height);
+        drawHead(g, c.kid, c.live.width / 2, c.live.height / 2 + 6, { open, img: c.img, ext, split });
+      }
+      requestAnimationFrame(frame);
+    }
+    requestAnimationFrame(frame);
+  </script>
+</body>
+</html>
