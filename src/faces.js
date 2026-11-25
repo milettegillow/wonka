@@ -179,18 +179,26 @@ const DRAW = {
     // gum-chewing champion: smug lidded eyes, jaw working, bubble
     const skin = scared ? '#fde4d6' : '#fcd5bd';
     const shade = '#e3a586';
-    const hair = '#8a3d2a', hairHi = '#b8603f';
-    p.e(5, 12, 6, 7, OUT); p.e(35, 12, 6, 7, OUT);
-    p.e(5, 12, 5, 6, hair); p.e(35, 12, 5, 6, hair);
-    p.r(3, 9, 2, 4, hairHi); p.r(36, 9, 2, 4, hairHi);
+    // blonde, pulled up into one high ponytail at the back of the crown
+    const hair = '#f2c766', hairHi = '#fde7a2', hairSh = '#c9963a';
+    // the tail: springs up from the crown and swings down behind her right side
+    const tail = [[25, 3, 3], [28, 1, 3], [31, 1, 3], [33, 3, 3], [34, 6, 3], [35, 10, 3], [35, 14, 2], [35, 18, 2], [36, 21, 2], [36, 24, 1]];
+    for (const [x, y, r] of tail) p.e(x, y, r + 1, r + 1, OUT);
+    for (const [x, y, r] of tail) p.e(x, y, r, r, hair);
+    for (const [x, y, r] of tail.slice(1, 7)) p.r(x - 1, y - r + 1, 2, 1, hairHi);
+    p.l(35, 8, 36, 19, hairSh); p.l(29, 0, 32, 1, hairHi);
     p.e(20, 15, 14, 11, OUT); p.e(20, 15, 13, 10, hair);
     faceShape(p, { cy: 22, rx: 12, ry: 14, skin, shade });
-    p.r(9, 8, 22, 5, hair); p.r(9, 13, 2, 3, hair); p.r(29, 13, 2, 3, hair);
-    p.r(11, 9, 17, 1, hairHi);
-    p.r(8, 9, 3, 4, P.pink1); p.r(29, 9, 3, 4, P.pink1); p.r(8, 9, 1, 1, P.pink3); p.r(29, 9, 1, 1, P.pink3);
+    // hair scraped back: smooth top, a short side-swept fringe
+    p.r(9, 8, 22, 4, hair); p.r(9, 12, 2, 3, hair); p.r(29, 12, 2, 4, hair);
+    p.l(10, 12, 18, 9, hair, 2); p.r(11, 13, 4, 1, hair);
+    for (let x = 12; x < 28; x += 4) p.r(x, 6, 1, 4, hairSh);
+    p.r(12, 7, 14, 1, hairHi); p.r(14, 5, 8, 1, hairHi);
+    // pink scrunchie round the ponytail
+    p.e(25, 4, 3, 2, OUT); p.e(25, 4, 2, 1, P.pink1); p.r(24, 3, 1, 1, P.pink3);
     if (scared) {
       bulgeEyes(p, 20, 20, 5, 3, 4);
-      flyingBrows(p, 20, 14, 5, hair);
+      flyingBrows(p, 20, 14, 5, hairSh);
       gape(p, 20, 29, 5, 5);
       p.l(15, 28, 25, 30, P.pink1); // gum strand across the scream
       tears(p, 12, 24, 5); tears(p, 28, 24, 6);
@@ -203,7 +211,7 @@ const DRAW = {
         p.r(sx - 1, 21, 2, 2, P.lilac1); p.r(sx - 1, 21, 1, 1, OUT);
         p.r(sx + 3, 18, 1, 1, OUT);
       }
-      p.l(11, 16, 17, 16, hair); p.l(23, 15, 29, 13, hair); // one brow cocked
+      p.l(11, 16, 17, 16, hairSh); p.l(23, 15, 29, 13, hairSh); // one brow cocked
       p.r(20, 24, 1, 2, shade);
       // chewing jaw: lopsided mouth, bulging cheek
       p.e(29, 26, 4, 3, shade); p.e(28, 25, 4, 3, skin);
@@ -219,15 +227,16 @@ const DRAW = {
     // spoilt rotten: upturned snout, sneer, tantrum brows, ringlets + bow
     const skin = scared ? '#ffc9c0' : '#fdd8c4';
     const shade = '#e7a48a';
-    const hair = '#f2c35a', hairSh = '#c98d2e';
+    // rich chocolate-brown ringlets
+    const hair = '#7a4122', hairSh = '#52291a', hairHi = '#a8653a';
     p.e(20, 17, 16, 13, OUT); p.e(20, 17, 15, 12, hair);
     for (let y = 13; y <= 35; y += 5) {
-      for (const x of [4, 36]) { p.e(x, y, 3, 3, OUT); p.e(x, y, 2, 2, ((y / 5) | 0) % 2 ? hair : hairSh); p.r(x - 1, y - 1, 1, 1, P.gold3); }
+      for (const x of [4, 36]) { p.e(x, y, 3, 3, OUT); p.e(x, y, 2, 2, ((y / 5) | 0) % 2 ? hair : hairSh); p.r(x - 1, y - 1, 1, 1, hairHi); }
     }
     faceShape(p, { cy: 22, rx: 12, ry: 14, skin, shade });
     p.e(20, 10, 12, 4, hair);
     p.r(9, 10, 4, 6, hair); p.r(27, 10, 4, 6, hair);
-    p.r(14, 8, 3, 1, P.gold3);
+    p.r(14, 8, 3, 1, hairHi); p.r(22, 9, 2, 1, hairHi);
     // enormous bow
     p.e(23, 4, 5, 4, OUT); p.e(35, 4, 5, 4, OUT);
     p.e(23, 4, 4, 3, P.pink1); p.e(35, 4, 4, 3, P.pink1);

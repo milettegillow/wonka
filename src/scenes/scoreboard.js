@@ -9,8 +9,8 @@ import { sfx, playMusic } from '../audio.js';
 import { getBest, GAME_IDS, MAX_LEVEL } from '../save.js';
 import { scoreQuip } from '../quips.js';
 import { CANDY } from '../palette.js';
+import { FULL_NAMES } from '../names.js';
 
-const NAMES = { charlie: 'Charlie', violet: 'Violet', veruca: 'Veruca', mike: 'Mike', augustus: 'Augustus' };
 
 export class ScoreboardScene {
   constructor(api, { tour = false, cleared = false } = {}) {
@@ -64,10 +64,10 @@ export class ScoreboardScene {
       const y = by + 44 + i * 30;
       rect(ctx, bx + 8, y - 13, bw - 16, 26, i % 2 ? P.pink4 : P.lilac3);
       drawHead(ctx, id, bx + 26, y, { scale: 0.55, open: this.scores[id] >= MAX_LEVEL ? Math.abs(Math.sin(t * 8 + i)) * 0.5 : 0 });
-      text(ctx, NAMES[id], bx + 46, y + 1, { size: 8, align: 'left', color: P.choc1 });
+      text(ctx, FULL_NAMES[id], bx + 46, y + 1, { size: 8, align: 'left', color: P.choc1 });
       const s = Math.min(this.scores[id], left);
       left -= this.scores[id];
-      drawSlots(ctx, bx + 218, y, Math.max(0, s), { r: 6, gap: 3, t });
+      drawSlots(ctx, bx + 238, y, Math.max(0, s), { r: 6, gap: 3, t });
     });
     ctx.restore();
 

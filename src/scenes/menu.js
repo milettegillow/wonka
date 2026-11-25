@@ -1,7 +1,7 @@
 // Main menu: the Chocolate Room as a candy land. The five kids ride a giant
 // boiled-sweet boat down the chocolate river: tap a kid for their close-up
 // card, the hull for the Grand tour, Wonka (or his board) for the scores.
-import { P } from '../palette.js';
+import { P, mix } from '../palette.js';
 import { W, H, rect, ellipse, text, stripePattern, stripeRect, FONT, seg, ease, sparkle, input } from '../engine.js';
 import { drawKid } from '../kids.js';
 import { drawSlots, drawBubble, drawButton, hit } from '../ui.js';
@@ -10,6 +10,7 @@ import { getBest, GAME_IDS } from '../save.js';
 import { helloQuip } from '../quips.js';
 import { drawHead } from '../faces.js';
 import { GAMES } from '../games/index.js';
+import { FULL_NAMES, nameParts } from '../names.js';
 import { candyBackground, drawClouds, drawRiverLife, drawWaterfall, drawLollipop, LOLLI } from '../candyland.js';
 
 const GAMES_META = Object.fromEntries(Object.entries(GAMES).map(([id, G]) => [id, G.meta]));
@@ -55,44 +56,100 @@ export function drawLogo(ctx, cx, cy, t, size = 32) {
 
 
 /* ------------------------------------------------------------------ layout */
-const NAMES = { charlie: 'Charlie', violet: 'Violet', veruca: 'Veruca', mike: 'Mike', augustus: 'Augustus' };
-const KID_S = 1.5;                      // kids in the boat, scaled up (nearest-neighbour)
-const BOAT = { x: 200, y: 170, hw: 118, h: 34 }; // centre x, deck line y, half-width, hull depth
+const KID_S = 1;                        // kids in the boat (native sprite size, crisp)
+const BOAT = { x: 206, y: 168, hw: 83, h: 24 }; // centre x, deck line y, half-width, hull depth
 // Left to right in the boat; Augustus in the middle, drawn first (behind).
 const CREW = [
-  { id: 'charlie', dx: -94 }, { id: 'violet', dx: -52 }, { id: 'augustus', dx: -4 },
-  { id: 'veruca', dx: 48 }, { id: 'mike', dx: 86 },
+  { id: 'charlie', dx: -66 }, { id: 'violet', dx: -36 }, { id: 'augustus', dx: -3 },
+  { id: 'veruca', dx: 34 }, { id: 'mike', dx: 60 },
 ];
 const DRAW_ORDER = ['augustus', 'violet', 'veruca', 'charlie', 'mike'];
-const FEET = 22;                        // kid feet sit this far below the deck line (hidden by the hull)
-const KC = { w: 110, h: 110, ox: 55, oy: 104 }; // offscreen sprite canvas + origin (feet)
+const FEET = 15;                        // kid feet sit this far below the deck line (hidden by the hull)
+const KC = { w: 110, h: 110, ox: 55, oy: 104 }; // offscreen kid sprite canvas + origin (feet)
 
-const WONKA = { x: 420, y: 262 };
-const BOARD = { x: 368, y: 58, w: 104, h: 76 };
+const WONKA = { x: 434, y: 262, s: 1.8 };
+const WC = { w: 96, h: 112, ox: 48, oy: 106 };  // offscreen Wonka sprite canvas + origin (feet)
+const BOARD = { x: 300, y: 58, w: 96, h: 72 };
 const LOLLIPOPS = [
+  { x: 80, y: 148, r: 12, c: 'berry' },
   { x: 52, y: 266, r: 22, c: 'pink', stick: 18 },
-  { x: 352, y: 150, r: 14, c: 'berry' },
-  { x: 298, y: 268, r: 16, c: 'lilac', stick: 22 },
-  { x: 468, y: 266, r: 13, c: 'blue', stick: 18 },
+  { x: 300, y: 268, r: 16, c: 'lilac', stick: 22 },
+  { x: 176, y: 268, r: 11, c: 'blue', stick: 16 },
 ];
 // Keep the busy stuff away from the boat and kids.
-const calm = (x, y) => x > BOAT.x - BOAT.hw - 20 && x < BOAT.x + BOAT.hw + 20 && y > 90 && y < 215;
+const calm = (x, y) => x > BOAT.x - BOAT.hw - 20 && x < BOAT.x + BOAT.hw + 20 && y > 100 && y < 215;
 
 const CARD = { x: 76, y: 32, w: 328, h: 208 };
 const CLOSE = { x: CARD.x + CARD.w - 26, y: CARD.y + 8, w: 18, h: 18 };
-const PLAY = { x: CARD.x + 176, y: CARD.y + 146, w: 128, h: 34 };
+const PLAY = { x: CARD.x + 176, y: CARD.y + 152, w: 128, h: 32 };
 
-/* ---------------------------------------------------------- kid sprites */
+const GOLD_OUT = '#f7bd34', GOLD_IN = '#ffe27a';
+const INFLATE = 0.08;
+
+/* ------------------------------------------------------------ sprites */
+// Each character is drawn at 1x into its own canvas, then scaled up with
+// nearest-neighbour. The same canvas gives pixel-perfect hit tests and the
+// gold hover outline.
 const sprites = {};
-function kidSprite(id) {
+function sprite(id, dims) {
   if (!sprites[id]) {
-    const c = document.createElement('canvas');
-    c.width = KC.w; c.height = KC.h;
+    const mkc = () => { const c = document.createElement('canvas'); c.width = dims.w; c.height = dims.h; return c; };
+    const c = mkc(), o = mkc(), m = mkc();
     const g = c.getContext('2d', { willReadFrequently: true });
-    g.imageSmoothingEnabled = false;
-    sprites[id] = { c, g };
+    const og = o.getContext('2d');
+    const mg = m.getContext('2d', { willReadFrequently: true });
+    g.imageSmoothingEnabled = false; og.imageSmoothingEnabled = false;
+    // m: the same pose with the mouth shut, at resting size: a steady hit mask
+    sprites[id] = { c, g, o, og, m, mg, dims };
   }
   return sprites[id];
+}
+// Rebuild the outline canvas: a 2px gold ring around the sprite's silhouette.
+const RING1 = [], RING2 = [];
+for (let dy = -2; dy <= 2; dy++) for (let dx = -2; dx <= 2; dx++) {
+  const d = dx * dx + dy * dy;
+  if (d === 0) continue;
+  if (d <= 2) RING1.push([dx, dy]); else if (d <= 5) RING2.push([dx, dy]);
+}
+function buildOutline(sp) {
+  const { o, og, c, dims } = sp;
+  og.clearRect(0, 0, dims.w, dims.h);
+  og.globalCompositeOperation = 'source-over';
+  for (const [dx, dy] of RING2) og.drawImage(c, dx, dy);
+  og.globalCompositeOperation = 'source-in';
+  og.fillStyle = GOLD_OUT; og.fillRect(0, 0, dims.w, dims.h);
+  og.globalCompositeOperation = 'source-over';
+  // inner ring in a lighter gold
+  const tmp = buildOutline.tmp || (buildOutline.tmp = document.createElement('canvas'));
+  tmp.width = dims.w; tmp.height = dims.h;
+  const tg = tmp.getContext('2d');
+  for (const [dx, dy] of RING1) tg.drawImage(c, dx, dy);
+  tg.globalCompositeOperation = 'source-in';
+  tg.fillStyle = GOLD_IN; tg.fillRect(0, 0, dims.w, dims.h);
+  og.drawImage(tmp, 0, 0);
+}
+// Draw a sprite at feet (fx, fy), scale s, with an optional gold outline.
+function blitSprite(ctx, sp, fx, fy, s, outline) {
+  const { dims } = sp;
+  const x = Math.round(fx - dims.ox * s), y = Math.round(fy - dims.oy * s);
+  const w = Math.round(dims.w * s), h = Math.round(dims.h * s);
+  if (outline) { buildOutline(sp); ctx.drawImage(sp.o, x, y, w, h); }
+  ctx.drawImage(sp.c, x, y, w, h);
+}
+// Is there an opaque sprite pixel near (x, y)? pos = { x, y, s, base } (feet,
+// drawn scale, resting scale). A hit on either what's drawn (maybe inflated,
+// mouth open) or the steady mask (mouth shut, resting size) counts, so the
+// hover reaction itself can never pull the character out from under the pointer.
+// steady = only the mask (used to start a hover, so animation can't flicker it).
+function spriteHit(sp, pos, x, y, r = 1, steady = false) {
+  return (!steady && canvasHit(sp.g, sp.dims, pos, pos.s, x, y, r)) || canvasHit(sp.mg, sp.dims, pos, pos.base ?? pos.s, x, y, r);
+}
+function canvasHit(g, dims, pos, s, x, y, r) {
+  const lx = Math.floor((x - pos.x) / s + dims.ox), ly = Math.floor((y - pos.y) / s + dims.oy);
+  if (lx < r || ly < r || lx >= dims.w - r || ly >= dims.h - r) return false;
+  const d = g.getImageData(lx - r, ly - r, r * 2 + 1, r * 2 + 1).data;
+  for (let k = 3; k < d.length; k += 4) if (d[k] > 0) return true;
+  return false;
 }
 
 /* --------------------------------------------------------------- the boat */
@@ -112,7 +169,7 @@ function drawHull(ctx, cx, top, t, hot) {
     const k = (yy + 2) / (h + 2);
     const w = Math.round(hw * (1 - Math.pow(k, 2.4) * 0.42));
     rect(ctx, cx - w - 1, top + yy, w * 2 + 2, 1, P.ink);
-    const col = yy < 1 ? P.pink4 : yy < 3 ? P.pink3 : yy < 9 ? P.pink2 : yy < h - 7 ? P.pink1 : P.pink0;
+    const col = yy < 1 ? P.pink4 : yy < 3 ? P.pink3 : yy < 7 ? P.pink2 : yy < h - 5 ? P.pink1 : P.pink0;
     rect(ctx, cx - w, top + yy, w * 2, 1, col);
   }
   rect(ctx, cx - hw, top + 3, hw * 2, 1, P.ink); // rim edge
@@ -126,69 +183,84 @@ function drawHull(ctx, cx, top, t, hot) {
   }
   ctx.clip();
   ctx.fillStyle = 'rgba(255,255,255,0.22)';
-  for (let i = -12; i < 14; i++) {
-    const x0 = cx + i * 18;
-    for (let yy = 4; yy <= h; yy++) ctx.fillRect(x0 + Math.round(yy * 0.6), top + yy, 6, 1);
+  for (let i = -10; i < 12; i++) {
+    const x0 = cx + i * 14;
+    for (let yy = 4; yy <= h; yy++) ctx.fillRect(x0 + Math.round(yy * 0.6), top + yy, 4, 1);
   }
   ctx.restore();
   // shine
-  rect(ctx, cx - hw + 14, top + 6, hw * 0.7, 2, 'rgba(255,255,255,0.75)');
-  rect(ctx, cx - hw + 10, top + 10, 8, 1, 'rgba(255,255,255,0.6)');
-  rect(ctx, cx + 30, top + 7, hw * 0.4, 1, 'rgba(255,255,255,0.45)');
+  rect(ctx, cx - hw + 10, top + 5, hw * 0.7, 2, 'rgba(255,255,255,0.75)');
+  rect(ctx, cx - hw + 7, top + 8, 6, 1, 'rgba(255,255,255,0.6)');
+  rect(ctx, cx + 22, top + 6, hw * 0.4, 1, 'rgba(255,255,255,0.45)');
   // swirly prow and stern
   for (const s of [-1, 1]) {
-    const px = cx + s * (hw + 4), py = top - 6;
-    rect(ctx, px - 3, py, 6, 12, P.ink); rect(ctx, px - 2, py, 4, 12, P.pink1);
-    drawLollipop(ctx, px, py + 2, 9, PROW.pink, t, { stick: -9, sparkle: false });
+    const px = cx + s * (hw + 3), py = top - 4;
+    rect(ctx, px - 2, py, 5, 9, P.ink); rect(ctx, px - 1, py, 3, 9, P.pink1);
+    drawLollipop(ctx, px, py + 1, 6, PROW.pink, t, { stick: -6, sparkle: false });
   }
   // the Grand tour label
   const pulse = hot ? 1 : Math.sin(t * 3) > 0.92 ? 1 : 0;
-  text(ctx, 'Grand tour', cx, top + 19 - pulse, { size: 12, color: hot ? P.pink4 : P.white, outline: P.pink0, ow: 2, shadow: P.raspberry, sh: 2 });
-  for (const s of [-1, 1]) sparkle(ctx, cx + s * 74, top + 18, Math.round(2 + Math.abs(Math.sin(t * 4 + s)) * 2), P.white);
+  text(ctx, 'Grand tour', cx, top + 14 - pulse, { size: 12, color: hot ? P.pink4 : P.white, outline: P.pink0, ow: 2, shadow: P.raspberry, sh: 2 });
+  for (const s of [-1, 1]) sparkle(ctx, cx + s * 69, top + 13, Math.round(2 + Math.abs(Math.sin(t * 4 + s)) * 2), P.white);
 }
 
 /* ------------------------------------------------------------------- scene */
+const canvasEl = () => document.getElementById('game');
+
 export class MenuScene {
   constructor(api) {
     this.api = api;
     this.t = 0;
     this.pausable = true;
-    this.hover = null;
+    this.hover = null;    // character under the mouse, or under a pressed finger
+    this.pressed = null;  // what the pointer went down on (activates on release)
     this.hello = helloQuip();
     this.card = null;     // { kind: 'kid'|'scores', id, t, closeT }
     this.hop = {};        // kid id -> seconds since hop started
     this.leaving = null;  // { kind: 'play'|'tour', id, t }
-    this.kidPos = {};     // last drawn screen position of each kid's feet
+    this.pos = {};        // last drawn feet position + scale of each character
+    this.order = DRAW_ORDER.slice();
+    this.spring = {};     // id -> { k, v } hover inflate spring
     playMusic('menu');
   }
 
-  boatY() { return BOAT.y + Math.round(Math.sin(this.t * 1.8) * 1.5); }
+  boatY() { return BOAT.y + Math.round(Math.sin(this.t * 1.8) * 1); }
   boatX() { return BOAT.x + (this.leaving?.kind === 'tour' ? this.leaving.t * 220 : 0); }
 
-  // Which kid's pixels are under (x, y)? Front-most first.
-  kidAt(x, y) {
-    if (y > this.boatY() + 4) return null; // below the rim is the hull
-    for (let i = DRAW_ORDER.length - 1; i >= 0; i--) {
-      const id = DRAW_ORDER[i];
-      const p = this.kidPos[id];
-      if (!p) continue;
-      const lx = Math.floor((x - p.x) / KID_S + KC.ox), ly = Math.floor((y - p.y) / KID_S + KC.oy);
-      if (lx < 1 || ly < 1 || lx >= KC.w - 1 || ly >= KC.h - 1) continue;
-      const d = kidSprite(id).g.getImageData(lx - 1, ly - 1, 3, 3).data;
-      for (let k = 3; k < d.length; k += 4) if (d[k] > 0) return id;
+  // Which kid's pixels are under (x, y)? Top-most (as last drawn) first.
+  kidAt(x, y, steady = false) {
+    if (y > this.boatY() + 3) return null; // below the rim is the hull
+    for (let i = this.order.length - 1; i >= 0; i--) {
+      const id = this.order[i];
+      if (this.pos[id] && spriteHit(sprite(id, KC), this.pos[id], x, y, 1, steady)) return id;
     }
     return null;
   }
   onHull(x, y) {
     const by = this.boatY();
-    return y >= by - 2 && y <= by + BOAT.h + 2 && Math.abs(x - this.boatX()) <= BOAT.hw + 8;
+    return y >= by - 2 && y <= by + BOAT.h + 2 && Math.abs(x - this.boatX()) <= BOAT.hw + 6;
   }
-  targetAt(x, y) {
-    const kid = this.kidAt(x, y);
+  targetAt(x, y, steady = false) {
+    if (this.pos.wonka && spriteHit(sprite('wonka', WC), this.pos.wonka, x, y, 1, steady)) return 'wonka';
+    const kid = this.kidAt(x, y, steady);
     if (kid) return kid;
     if (this.onHull(x, y)) return 'tour';
-    if (hit({ x: WONKA.x - 26, y: WONKA.y - 104, w: 52, h: 108 }, x, y) || hit(BOARD, x, y)) return 'wonka';
+    if (hit(BOARD, x, y)) return 'board';
     return null;
+  }
+  // Still close to the character we're already hovering? (Hover makes the
+  // mouth open, which moves the head; this stops it flickering on and off.)
+  nearHovered(x, y) {
+    const id = this.hover === 'board' ? null : this.hover;
+    if (!id || id === 'tour' || !this.pos[id]) return false;
+    if (id !== 'wonka' && y > this.boatY() + 3) return false;
+    const sp = id === 'wonka' ? sprite('wonka', WC) : sprite(id, KC);
+    return spriteHit(sp, this.pos[id], x, y, 3);
+  }
+  // Mouse hovering, or a finger held down, over r?
+  cursorOn(r) {
+    const live = input.type === 'mouse' ? input.hover : input.down;
+    return live && hit(r, input.x, input.y);
   }
 
   update(dt) {
@@ -198,11 +270,29 @@ export class MenuScene {
       this.card.t += dt;
       if (this.card.closeT >= 0) { this.card.closeT += dt; if (this.card.closeT > 0.16) this.card = null; }
     }
-    this.hover = !this.card && !this.leaving && input.type === 'mouse' && input.hover ? this.targetAt(input.x, input.y) : null;
+    // hover: the mouse over a character, or a finger held down on one
+    const live = input.type === 'mouse' ? input.hover : input.down;
+    this.hover = !this.card && !this.leaving && live ? (this.nearHovered(input.x, input.y) ? this.hover : this.targetAt(input.x, input.y, true)) : null;
+    // springy inflate toward 1 while hovered
+    for (const id of [...CREW.map((c) => c.id), 'wonka']) {
+      const sp = this.spring[id] || (this.spring[id] = { k: 0, v: 0 });
+      const target = this.hover === id || (id === 'wonka' && this.hover === 'board') ? 1 : 0;
+      sp.v += ((target - sp.k) * 420 - sp.v * 22) * dt;
+      sp.k += sp.v * dt;
+      if (!target && sp.k < 0.002 && Math.abs(sp.v) < 0.01) { sp.k = 0; sp.v = 0; }
+    }
+    // pointer cursor over anything tappable
+    const el = canvasEl();
+    if (el) {
+      const onBtn = this.card && this.card.closeT < 0 && (this.cursorOn(CLOSE) || (this.card.kind === 'kid' && this.cursorOn(PLAY)));
+      const want = input.type === 'mouse' && (this.hover || onBtn) ? 'pointer' : '';
+      if (el.style.cursor !== want) el.style.cursor = want;
+    }
     if (this.leaving) {
       this.leaving.t += dt;
       if (this.leaving.t > 0.55 && !this.left) {
         this.left = true;
+        if (el) el.style.cursor = '';
         if (this.leaving.kind === 'tour') this.api.startTour();
         else this.api.startSingle(this.leaving.id);
       }
@@ -230,56 +320,86 @@ export class MenuScene {
       }
       return;
     }
+    // characters and the boat act on release, so a held finger shows the outline first
+    this.pressed = this.targetAt(x, y);
+    if (this.pressed && this.pressed !== 'tour') sfx('blip');
+  }
+  onUp(x, y) {
+    const p = this.pressed;
+    this.pressed = null;
+    if (!p || this.card || this.leaving) return;
     const h = this.targetAt(x, y);
-    if (!h) return;
-    if (h === 'tour') { sfx('boat'); this.leaving = { kind: 'tour', t: 0 }; return; }
-    if (h === 'wonka') { this.openCard('scores'); return; }
-    this.hop[h] = 0;
+    const same = h === p || ((h === 'board' || h === 'wonka') && (p === 'board' || p === 'wonka'));
+    if (!same) return;
+    if (p === 'tour') { sfx('boat'); this.leaving = { kind: 'tour', t: 0 }; return; }
+    if (p === 'wonka' || p === 'board') { this.openCard('scores'); return; }
+    this.hop[p] = 0;
     sfx('squeak');
-    this.openCard('kid', h);
+    this.openCard('kid', p);
   }
 
   /* --------------------------------------------------------------- drawing */
   drawCrew(ctx, t, bx, by) {
     const selected = this.card?.kind === 'kid' && this.card.closeT < 0 ? this.card.id : null;
-    for (const id of DRAW_ORDER) {
+    // the hovered kid draws on top so their outline is fully visible
+    const front = CREW.some((c) => c.id === this.hover) ? this.hover : selected;
+    this.order = DRAW_ORDER.filter((id) => id !== front).concat(front ? [front] : []);
+    for (const id of this.order) {
       const i = CREW.findIndex((c) => c.id === id);
       const c = CREW[i];
       const ht = this.hop[id];
-      const hop = ht != null && ht < 0.5 ? Math.abs(Math.sin((ht / 0.25) * Math.PI)) * (ht < 0.25 ? 12 : 5) : 0;
+      const hop = ht != null && ht < 0.5 ? Math.abs(Math.sin((ht / 0.25) * Math.PI)) * (ht < 0.25 ? 9 : 4) : 0;
       const sway = Math.round(Math.sin(t * 2.2 + i * 1.3) * 0.6);
       const fx = Math.round(bx + c.dx), fy = Math.round(by + FEET - hop + sway);
-      this.kidPos[id] = { x: fx, y: fy };
-      const { c: cv, g } = kidSprite(id);
-      g.clearRect(0, 0, KC.w, KC.h);
+      const hk = this.spring[id]?.k ?? 0;
+      const s = KID_S * (1 + INFLATE * hk);
+      this.pos[id] = { x: fx, y: fy, s, base: KID_S };
+      const sp = sprite(id, KC);
+      sp.g.clearRect(0, 0, KC.w, KC.h);
       const hot = this.hover === id;
       const chatter = Math.max(0, Math.sin(t * 9 + i * 2.1)) * (Math.sin(t * 0.8 + i * 1.7) > 0.55 ? 0.45 : 0);
-      const pose = selected === id || (this.leaving?.kind === 'tour') ? 'cheer' : id === 'veruca' && Math.sin(t * 0.45) > 0.8 ? 'tantrum' : id === 'violet' && Math.sin(t * 0.37 + 1) > 0.85 ? 'hips' : 'idle';
-      drawKid(g, id, KC.ox, KC.oy, {
+      const pose = selected === id || this.leaving?.kind === 'tour' ? 'cheer' : id === 'veruca' && Math.sin(t * 0.45) > 0.8 ? 'tantrum' : id === 'violet' && Math.sin(t * 0.37 + 1) > 0.85 ? 'hips' : 'idle';
+      sp.mg.clearRect(0, 0, KC.w, KC.h);
+      drawKid(sp.mg, id, KC.ox, KC.oy, { pose, t: t + i * 3, open: 0 });
+      drawKid(sp.g, id, KC.ox, KC.oy, {
         pose, t: t + i * 3,
         open: selected === id || hop ? 0.15 + Math.abs(Math.sin(t * 12)) * 0.35 : hot ? 0.3 + Math.abs(Math.sin(t * 10)) * 0.4 : id === 'violet' ? Math.abs(Math.sin(t * 6)) * 0.3 : chatter,
       });
-      ctx.drawImage(cv, fx - KC.ox * KID_S, fy - KC.oy * KID_S, KC.w * KID_S, KC.h * KID_S);
-      if (hot) {
-        const hp = drawHeadTop(id, fx, fy);
-        sparkle(ctx, hp.x + 24, hp.y, 2 + Math.round(Math.abs(Math.sin(t * 12)) * 2), P.white);
-      }
+      blitSprite(ctx, sp, fx, fy, s, hot || hk > 0.05);
     }
+  }
+
+  drawWonka(ctx, t) {
+    const wsel = this.card?.kind === 'scores' && this.card.closeT < 0;
+    const hot = this.hover === 'wonka' || this.hover === 'board';
+    const sp = sprite('wonka', WC);
+    sp.g.clearRect(0, 0, WC.w, WC.h);
+    sp.mg.clearRect(0, 0, WC.w, WC.h);
+    drawKid(sp.mg, 'wonka', WC.ox, WC.oy, { t, pose: wsel ? 'cheer' : t < 3 ? 'talk' : 'present', flip: true, open: 0 });
+    drawKid(sp.g, 'wonka', WC.ox, WC.oy, {
+      t, pose: wsel ? 'cheer' : t < 3 ? 'talk' : 'present', flip: true,
+      open: t > 0.4 && t < 3 ? Math.abs(Math.sin(t * 20)) * 0.6 : hot ? 0.3 + Math.abs(Math.sin(t * 10)) * 0.3 : 0,
+    });
+    const hk = this.spring.wonka?.k ?? 0;
+    const s = WONKA.s * (1 + INFLATE * hk);
+    this.pos.wonka = { x: WONKA.x, y: WONKA.y, s, base: WONKA.s };
+    ellipse(ctx, WONKA.x + 2, WONKA.y + 1, 26, 4, 'rgba(60,30,80,0.25)');
+    blitSprite(ctx, sp, WONKA.x, WONKA.y, s, hot || hk > 0.05);
   }
 
   drawBoard(ctx, t) {
     const b = BOARD;
-    const hot = this.hover === 'wonka';
-    for (const px of [b.x + 14, b.x + b.w - 18]) { rect(ctx, px - 1, b.y + b.h, 6, 16, P.ink); rect(ctx, px, b.y + b.h, 4, 16, P.wood1); }
-    rect(ctx, b.x - 2, b.y - 2, b.w + 4, b.h + 4, P.ink);
+    const hot = this.hover === 'wonka' || this.hover === 'board';
+    for (const px of [b.x + 12, b.x + b.w - 16]) { rect(ctx, px - 1, b.y + b.h, 6, 18, P.ink); rect(ctx, px, b.y + b.h, 4, 18, P.wood1); }
+    rect(ctx, b.x - 2, b.y - 2, b.w + 4, b.h + 4, hot ? GOLD_OUT : P.ink);
     rect(ctx, b.x, b.y, b.w, b.h, hot ? P.plum2 : P.plum1);
     rect(ctx, b.x + 3, b.y + 3, b.w - 6, b.h - 6, P.plum0);
     rect(ctx, b.x, b.y, b.w, 2, P.gold1);
     text(ctx, 'Scores', b.x + b.w / 2, b.y + 11, { size: 8, color: P.gold2 });
     GAME_IDS.forEach((id, i) => {
-      const yy = b.y + 23 + i * 10;
-      drawHead(ctx, id, b.x + 16, yy, { scale: 0.24 });
-      drawSlots(ctx, b.x + 64, yy, getBest(id), { r: 2, gap: 2, t });
+      const yy = b.y + 22 + i * 10;
+      drawHead(ctx, id, b.x + 15, yy, { scale: 0.24 });
+      drawSlots(ctx, b.x + 60, yy, getBest(id), { r: 2, gap: 2, t });
     });
   }
 
@@ -302,7 +422,7 @@ export class MenuScene {
     if (c.kind === 'kid') this.drawKidCard(ctx, t, c);
     else this.drawScoreCard(ctx, t);
     // close button
-    const hotX = input.type === 'mouse' && input.hover && hit(CLOSE, input.x, input.y);
+    const hotX = this.cursorOn(CLOSE);
     rect(ctx, CLOSE.x - 1, CLOSE.y - 1, CLOSE.w + 2, CLOSE.h + 2, P.ink);
     rect(ctx, CLOSE.x, CLOSE.y, CLOSE.w, CLOSE.h, hotX ? P.pink2 : P.pink1);
     rect(ctx, CLOSE.x, CLOSE.y, CLOSE.w, 2, P.pink3);
@@ -329,12 +449,14 @@ export class MenuScene {
     drawKid(ctx, id, sx + sw / 2, sy + sh - 8, { pose: cheer ? 'cheer' : 'idle', t, scale: 2, open: cheer ? 0.15 + Math.abs(Math.sin(t * 12)) * 0.35 : Math.max(0, Math.sin(t * 8)) * (Math.sin(t * 0.9) > 0.5 ? 0.35 : 0) });
     ctx.restore();
     const mx = x + 240;
-    text(ctx, NAMES[id], mx, y + 40, { size: 16, color: P.pink1, outline: P.ink, ow: 1, shadow: P.pink0, sh: 2 });
-    text(ctx, meta.room, mx, y + 64, { size: 8, color: P.lilac0 });
+    const [first, last] = nameParts(id);
+    text(ctx, first, mx, y + 36, { size: 16, color: P.pink1, outline: P.ink, ow: 1, shadow: P.pink0, sh: 2 });
+    text(ctx, last, mx, y + 58, { size: 12, color: P.pink1, outline: P.ink, ow: 1, shadow: P.pink0, sh: 2 });
+    text(ctx, meta.room, mx, y + 80, { size: 8, color: P.lilac0 });
     const best = getBest(id);
-    drawSlots(ctx, mx, y + 96, best, { r: 7, gap: 4, t });
-    text(ctx, best >= 5 ? 'All five!' : best ? `Best: level ${best}` : 'Not played yet', mx, y + 118, { size: 8, color: P.choc2 });
-    const hotP = input.type === 'mouse' && input.hover && hit(PLAY, input.x, input.y);
+    drawSlots(ctx, mx, y + 104, best, { r: 7, gap: 4, t });
+    text(ctx, best >= 5 ? 'All five!' : best ? `Best: level ${best}` : 'Not played yet', mx, y + 126, { size: 8, color: P.choc2 });
+    const hotP = this.cursorOn(PLAY);
     drawButton(ctx, PLAY, 'Play', { color: P.pink1, size: 12, t, pressed: this.leaving?.kind === 'play', textColor: hotP ? P.pink0 : P.ink });
   }
 
@@ -345,7 +467,7 @@ export class MenuScene {
       const ry = y + 54 + i * 30;
       rect(ctx, x + 16, ry - 13, w - 32, 26, i % 2 ? P.pink4 : P.lilac4);
       drawHead(ctx, id, x + 34, ry, { scale: 0.55, open: getBest(id) >= 5 ? Math.abs(Math.sin(t * 8 + i)) * 0.5 : 0 });
-      text(ctx, NAMES[id], x + 54, ry + 1, { size: 8, align: 'left', color: P.choc1 });
+      text(ctx, FULL_NAMES[id], x + 54, ry + 1, { size: 8, align: 'left', color: P.choc1 });
       drawSlots(ctx, x + w - 82, ry, getBest(id), { r: 6, gap: 3, t });
     });
   }
@@ -362,9 +484,9 @@ export class MenuScene {
     // the boat, its wake, and the five kids standing in it
     const bx = Math.round(this.boatX()), by = this.boatY();
     for (let i = 0; i < 6; i++) {
-      const wx = bx - BOAT.hw - 4 - i * 9 + ((t * 24) % 9);
-      rect(ctx, wx, by + BOAT.h - 6 + (i % 2) * 3, 5, 1, P.caramel);
-      rect(ctx, bx + BOAT.hw - 10 + i * 4, by + BOAT.h - 2 + Math.round(Math.sin(t * 3 + i)), 3, 1, P.choc4);
+      const wx = bx - BOAT.hw - 4 - i * 7 + ((t * 20) % 7);
+      rect(ctx, wx, by + BOAT.h - 5 + (i % 2) * 2, 4, 1, P.caramel);
+      rect(ctx, bx + BOAT.hw - 8 + i * 3, by + BOAT.h - 2 + Math.round(Math.sin(t * 3 + i)), 2, 1, P.choc4);
     }
     ctx.save(); clipToBoat(ctx, bx, by);
     this.drawCrew(ctx, t, bx, by);
@@ -374,15 +496,10 @@ export class MenuScene {
 
     for (const l of LOLLIPOPS.filter((l) => l.y >= 200)) drawLollipop(ctx, l.x, l.y, l.r, LOLLI[l.c], t, { stick: l.stick, sway: true });
 
-    // Wonka by his scoreboard
-    const wsel = this.card?.kind === 'scores' && this.card.closeT < 0;
-    ellipse(ctx, WONKA.x + 2, WONKA.y + 1, 17, 3, 'rgba(60,30,80,0.25)');
-    drawKid(ctx, 'wonka', WONKA.x, WONKA.y, {
-      t, scale: 1.2, pose: wsel ? 'cheer' : t < 3 ? 'talk' : 'present', flip: true,
-      open: t > 0.4 && t < 3 ? Math.abs(Math.sin(t * 20)) * 0.6 : this.hover === 'wonka' ? 0.3 : 0,
-    });
+    // Wonka on the right bank, by his scoreboard
+    this.drawWonka(ctx, t);
     if (t > 0.4 && t < 4.2 && !this.card) {
-      drawBubble(ctx, W - 6, 152, this.hello, { align: 'right', shown: Math.floor((t - 0.4) * 30), maxChars: 18, tailX: WONKA.x - 4, tailDir: -1 });
+      drawBubble(ctx, 402, 132, this.hello, { align: 'right', shown: Math.floor((t - 0.4) * 30), maxChars: 18, tailX: 386, tailDir: 1 });
     }
     drawLogo(ctx, 402, 22, t, 16);
 
@@ -393,10 +510,4 @@ export class MenuScene {
       ctx.globalAlpha = 1;
     }
   }
-}
-
-// Rough top of a kid's head in screen space (for hover sparkles).
-function drawHeadTop(id, fx, fy) {
-  const tops = { charlie: -62, violet: -59, veruca: -64, mike: -57, augustus: -65 };
-  return { x: fx, y: fy + tops[id] * KID_S };
 }

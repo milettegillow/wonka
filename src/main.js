@@ -42,6 +42,7 @@ export const api = {
   go(name, data = {}) {
     resetFx();
     paused = false;
+    canvas.style.cursor = '';
     scene = new SCENES[name](api, data);
     scene.name = name;
   },
@@ -124,6 +125,7 @@ const router = {
     if (paused) { pauseTap(x, y); return; }
     if (scene?.pausable && hit({ x: MENU_BTN.x - 3, y: MENU_BTN.y - 3, w: MENU_BTN.w + 8, h: MENU_BTN.h + 8 }, x, y)) {
       paused = true; sfx('tap');
+      canvas.style.cursor = '';
       scene.onPause?.();
       return;
     }
