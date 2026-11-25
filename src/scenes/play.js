@@ -155,7 +155,7 @@ export class PlayScene {
       ctx.restore();
     }
     bigWord(ctx, this.meta.command, mx, cy + 56, Math.max(0, t - 0.1), { size: 32, color: P.pink1, shadow: P.pink0, outline: P.ink, ow: 2, sh: 3 });
-    text(ctx, `Level ${this.level}`, mx, cy + 92, { size: 12, color: P.lilac0 });
+    text(ctx, `Level ${this.level}`, mx, cy + 91, { size: 16, color: P.lilac0 });
     drawSlots(ctx, mx, cy + 110, this.filled, { r: 4, gap: 2, t: this.t, pulseIdx: this.level - 1 });
     const lines = wrap(this.meta.line, 24);
     lines.forEach((ln, i) => text(ctx, ln, mx, cy + 130 + i * 12, { size: 8, color: P.choc2 }));

@@ -101,26 +101,7 @@ export function wrap(s, maxChars) {
   return lines;
 }
 // Speech bubble; `shown` = number of characters revealed (typewriter).
-let bubbleCanvas = null;
 export function drawBubble(ctx, x, y, s, o = {}) {
-  // o.scale: draw full size off-screen, then shrink the whole bubble (box,
-  // padding, text) about its anchor (x, y).
-  if (o.scale && o.scale !== 1) {
-    const lines = wrap(s, o.maxChars ?? 20);
-    const w = Math.max(...lines.map((l) => l.length)) * 8 + 14, h = lines.length * 12 + 10;
-    const c = bubbleCanvas || (bubbleCanvas = document.createElement('canvas'));
-    c.width = w + 20; c.height = h + 12;
-    const g = c.getContext('2d');
-    const ax = o.align === 'right' ? w + 2 : o.align === 'center' ? w / 2 + 2 : 2; // anchor inside c
-    drawBubble(g, ax, h + 2, s, { ...o, scale: 1, tailX: o.tailX != null ? o.tailX - x + ax : undefined });
-    const k = o.scale;
-    ctx.save();
-    ctx.imageSmoothingEnabled = true;
-    ctx.imageSmoothingQuality = 'high';
-    ctx.drawImage(c, Math.round(x - ax * k), Math.round(y - (h + 2) * k), c.width * k, c.height * k);
-    ctx.restore();
-    return;
-  }
   const maxChars = o.maxChars ?? 20;
   const lines = wrap(s, maxChars);
   const longest = Math.max(...lines.map((l) => l.length));

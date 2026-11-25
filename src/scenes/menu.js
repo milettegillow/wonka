@@ -2,7 +2,7 @@
 // boiled-sweet boat down the chocolate river: tap a kid for their close-up
 // card, the hull for the Grand tour, Wonka (or his board) for the scores.
 import { P, mix } from '../palette.js';
-import { W, H, rect, ellipse, text, stripePattern, stripeRect, FONT, seg, ease, sparkle, input } from '../engine.js';
+import { W, H, rect, ellipse, text, textMask, stripePattern, stripeRect, seg, ease, sparkle, input } from '../engine.js';
 import { drawKid } from '../kids.js';
 import { drawSlots, drawBubble, drawButton, hit } from '../ui.js';
 import { sfx, playMusic } from '../audio.js';
@@ -18,42 +18,57 @@ const GAMES_META = Object.fromEntries(Object.entries(GAMES).map(([id, G]) => [id
 const LETTER_COLS = [
   [P.pink1, P.pink3], [P.lilac1, P.lilac3], [P.mint1, P.mint3], [P.red2, P.pink4],
 ];
-// Chunky candy pixel logo, letters bouncing in a wave.
+// Chunky candy pixel logo, letters bouncing in a wave. Each letter is built
+// once from a hard-edged glyph mask (extruded outline, candy-stripe fill,
+// glossy top) and cached, so it stays crisp.
+const logoCache = new Map();
+function logoLetter(ch, size, c1, c2) {
+  const key = ch + size + c1 + c2;
+  let L = logoCache.get(key);
+  if (L) return L;
+  const m = textMask(ch, size);
+  const o = Math.max(1, Math.round(size / 12));
+  const depth = Math.round(size / 5);
+  const pad = o + 1;
+  const c = document.createElement('canvas');
+  c.width = m.c.width + pad * 2; c.height = m.c.height + pad * 2 + depth;
+  const g = c.getContext('2d');
+  const tint = (col) => {
+    const t = document.createElement('canvas'); t.width = m.c.width; t.height = m.c.height;
+    const tg = t.getContext('2d'); tg.drawImage(m.c, 0, 0);
+    tg.globalCompositeOperation = 'source-in'; tg.fillStyle = col; tg.fillRect(0, 0, t.width, t.height);
+    return t;
+  };
+  const ring = [[-o, 0], [o, 0], [0, -o], [0, o], [-o, -o], [o, o], [-o, o], [o, -o]];
+  const ink = tint(P.ink), choc = tint(P.choc2);
+  for (let d = depth; d >= 1; d--) for (const [ox, oy] of ring) g.drawImage(d > size / 7 ? ink : choc, pad + ox, pad + oy + d);
+  for (const [ox, oy] of ring) g.drawImage(ink, pad + ox, pad + oy);
+  const face = tint(stripePattern(g, c1, c2, Math.max(2, Math.round(size / 10))));
+  g.drawImage(face, pad, pad);
+  // glossy top band, only on the letter itself
+  const gl = document.createElement('canvas'); gl.width = m.c.width; gl.height = m.c.height;
+  const gg = gl.getContext('2d'); gg.drawImage(m.c, 0, 0);
+  gg.globalCompositeOperation = 'source-in';
+  gg.fillStyle = 'rgba(255,255,255,0.55)';
+  gg.fillRect(0, 0, gl.width, m.pad + Math.round(size * 0.22));
+  g.drawImage(gl, pad, pad);
+  L = { c, ox: pad + m.pad + Math.round(m.w / 2), oy: pad + m.pad + Math.round(m.h / 2) };
+  logoCache.set(key, L);
+  return L;
+}
 export function drawLogo(ctx, cx, cy, t, size = 32) {
   const word = 'WonkaWare';
   const step = size;
   const x0 = cx - (word.length * step) / 2 + step / 2;
-  const o = Math.max(1, Math.round(size / 12));
-  ctx.save();
-  ctx.font = `${size}px ${FONT}`;
-  ctx.textAlign = 'center';
-  ctx.textBaseline = 'middle';
-  const ring = [[-o, 0], [o, 0], [0, -o], [0, o], [-o, -o], [o, o], [-o, o], [o, -o]];
   for (let i = 0; i < word.length; i++) {
-    const ch = word[i];
     const intro = seg(t, i * 0.06, 0.35, ease.outBack);
     const x = Math.round(x0 + i * step);
     const y = Math.round(cy + Math.sin(t * 4 - i * 0.6) * (size / 12) - (1 - intro) * 80);
     const [c1, c2] = LETTER_COLS[i % LETTER_COLS.length];
-    for (let d = Math.round(size / 5); d >= 1; d--) {
-      ctx.fillStyle = d > size / 7 ? P.ink : P.choc2;
-      for (const [ox, oy] of ring) ctx.fillText(ch, x + ox, y + oy + d);
-    }
-    ctx.fillStyle = P.ink;
-    for (const [ox, oy] of ring) ctx.fillText(ch, x + ox, y + oy);
-    ctx.fillStyle = stripePattern(ctx, c1, c2, Math.max(2, Math.round(size / 10)));
-    ctx.fillText(ch, x, y);
-    ctx.save();
-    ctx.beginPath();
-    ctx.rect(x - size / 2, y - size / 2, size, Math.round(size * 0.22));
-    ctx.clip();
-    ctx.fillStyle = 'rgba(255,255,255,0.55)';
-    ctx.fillText(ch, x, y);
-    ctx.restore();
+    const L = logoLetter(word[i], size, c1, c2);
+    ctx.drawImage(L.c, x - L.ox, y - L.oy);
   }
-  ctx.restore();
 }
-
 
 /* ------------------------------------------------------------------ layout */
 const KID_S = 1;                        // kids in the boat (native sprite size, crisp)
@@ -73,9 +88,9 @@ const BOARD = { x: 300, y: 58, w: 96, h: 72 };
 // Keep the busy stuff away from the boat and kids.
 const calm = (x, y) => x > BOAT.x - BOAT.hw - 20 && x < BOAT.x + BOAT.hw + 20 && y > 100 && y < 215;
 
-const CARD = { x: 76, y: 32, w: 328, h: 208 };
+const CARD = { x: 64, y: 32, w: 352, h: 208 };
 const CLOSE = { x: CARD.x + CARD.w - 26, y: CARD.y + 8, w: 18, h: 18 };
-const PLAY = { x: CARD.x + 176, y: CARD.y + 152, w: 128, h: 32 };
+const PLAY = { x: CARD.x + 180, y: CARD.y + 152, w: 128, h: 32 };
 
 const GOLD_OUT = '#f7bd34', GOLD_IN = '#ffe27a';
 const INFLATE = 0.08;
@@ -194,8 +209,8 @@ function drawHull(ctx, cx, top, t, hot) {
   }
   // the Grand tour label
   const pulse = hot ? 1 : Math.sin(t * 3) > 0.92 ? 1 : 0;
-  text(ctx, 'Grand tour', cx, top + 14 - pulse, { size: 12, color: hot ? P.pink4 : P.white, outline: P.pink0, ow: 2, shadow: P.raspberry, sh: 2 });
-  for (const s of [-1, 1]) sparkle(ctx, cx + s * 69, top + 13, Math.round(2 + Math.abs(Math.sin(t * 4 + s)) * 2), P.white);
+  text(ctx, 'Grand tour', cx, top + 13 - pulse, { size: 8, color: hot ? P.pink4 : P.white, outline: P.pink0, ow: 1, shadow: P.raspberry, sh: 2 });
+  for (const s of [-1, 1]) sparkle(ctx, cx + s * 50, top + 12, Math.round(2 + Math.abs(Math.sin(t * 4 + s)) * 2), P.white);
 }
 
 /* ------------------------------------------------------------------- scene */
@@ -432,7 +447,7 @@ export class MenuScene {
     const id = c.id;
     const meta = GAMES_META[id];
     // a little stage for the kid
-    const sx = x + 16, sy = y + 16, sw = 136, sh = h - 32;
+    const sx = x + 16, sy = y + 16, sw = 124, sh = h - 32;
     rect(ctx, sx - 1, sy - 1, sw + 2, sh + 2, P.ink);
     stripeRect(ctx, sx, sy, sw, sh, P.lilac3, P.lilac4, 8, 0);
     rect(ctx, sx, sy + sh - 22, sw, 22, P.pink3);
@@ -442,21 +457,21 @@ export class MenuScene {
     const cheer = c.t < 0.9;
     drawKid(ctx, id, sx + sw / 2, sy + sh - 8, { pose: cheer ? 'cheer' : 'idle', t, scale: 2, open: cheer ? 0.15 + Math.abs(Math.sin(t * 12)) * 0.35 : Math.max(0, Math.sin(t * 8)) * (Math.sin(t * 0.9) > 0.5 ? 0.35 : 0) });
     ctx.restore();
-    const mx = x + 240;
+    const mx = x + 244;
     const [first, last] = nameParts(id);
     text(ctx, first, mx, y + 36, { size: 16, color: P.pink1, outline: P.ink, ow: 1, shadow: P.pink0, sh: 2 });
-    text(ctx, last, mx, y + 58, { size: 12, color: P.pink1, outline: P.ink, ow: 1, shadow: P.pink0, sh: 2 });
+    text(ctx, last, mx, y + 58, { size: 16, color: P.pink1, outline: P.ink, ow: 1, shadow: P.pink0, sh: 2 });
     text(ctx, meta.room, mx, y + 80, { size: 8, color: P.lilac0 });
     const best = getBest(id);
     drawSlots(ctx, mx, y + 104, best, { r: 7, gap: 4, t });
     text(ctx, best >= 5 ? 'All five!' : best ? `Best: level ${best}` : 'Not played yet', mx, y + 126, { size: 8, color: P.choc2 });
     const hotP = this.cursorOn(PLAY);
-    drawButton(ctx, PLAY, 'Play', { color: P.pink1, size: 12, t, pressed: this.leaving?.kind === 'play', textColor: hotP ? P.pink0 : P.ink });
+    drawButton(ctx, PLAY, 'Play', { color: P.pink1, size: 16, t, pressed: this.leaving?.kind === 'play', textColor: hotP ? P.pink0 : P.ink });
   }
 
   drawScoreCard(ctx, t) {
     const { x, y, w } = CARD;
-    text(ctx, 'Best levels', x + w / 2, y + 26, { size: 12, color: P.pink1, outline: P.ink, ow: 1 });
+    text(ctx, 'Best levels', x + w / 2, y + 26, { size: 16, color: P.pink1, outline: P.ink, ow: 1 });
     GAME_IDS.forEach((id, i) => {
       const ry = y + 54 + i * 30;
       rect(ctx, x + 16, ry - 13, w - 32, 26, i % 2 ? P.pink4 : P.lilac4);
@@ -498,7 +513,7 @@ export class MenuScene {
     drawLollipops(ctx, t, WONKA.y, Infinity);
     if (t > 0.4 && t < 4.2 && !this.card) {
       // above the boat's right end, clear of the kids' heads
-      drawBubble(ctx, 404, 110, this.hello, { align: 'right', shown: Math.floor((t - 0.4) * 30), maxChars: 18, tailX: 388, tailDir: 1, scale: 0.8 });
+      drawBubble(ctx, 404, 112, this.hello, { align: 'right', shown: Math.floor((t - 0.4) * 30), maxChars: 15, tailX: 388, tailDir: 1 });
     }
     drawLogo(ctx, 402, 22, t, 16);
 

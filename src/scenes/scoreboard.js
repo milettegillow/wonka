@@ -58,7 +58,7 @@ export class ScoreboardScene {
     rect(ctx, bx - 2, by - 2, bw + 4, bh + 4, P.gold1);
     rect(ctx, bx, by, bw, bh, P.lilac4);
     rect(ctx, bx, by, bw, 24, P.pink1);
-    text(ctx, this.tour ? 'Grand tour' : 'Best levels', bx + bw / 2, by + 13, { size: 12, color: P.white, outline: P.pink0, ow: 1 });
+    text(ctx, this.tour ? 'Grand tour' : 'Best levels', bx + bw / 2, by + 13, { size: 16, color: P.white, outline: P.pink0, ow: 1 });
     let left = this.shown;
     GAME_IDS.forEach((id, i) => {
       const y = by + 44 + i * 30;

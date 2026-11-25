@@ -271,9 +271,9 @@ export class VerucaGame extends MicroGame {
     if (t > 0.8 && t < 1.6) {
       const k = seg(t, 0.8, 0.15, ease.outBack);
       ctx.save();
-      ctx.translate(Math.max(60, vx + 4), head.y - 46);
+      ctx.translate(Math.round(Math.max(72, vx + 4)), Math.round(head.y - 46));
       ctx.scale(k, k);
-      text(ctx, 'Bad nut!', 0, 0, { size: 12, color: P.red1, outline: P.ink, ow: 2, shadow: P.white });
+      text(ctx, 'Bad nut!', 0, 0, { size: 16, color: P.red1, outline: P.ink, ow: 2, shadow: P.white });
       ctx.restore();
     }
   }

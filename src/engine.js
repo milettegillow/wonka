@@ -250,24 +250,101 @@ export function stripeRect(ctx, x, y, w, h, c1, c2, sw = 4, off = 0) {
 }
 
 /* --------------------------------------------------------------- text */
+// Crisp pixel text. Canvas fillText anti-aliases glyph edges, and scaling the
+// canvas up magnifies the soft pixels. So each string is drawn once to an
+// offscreen canvas, its alpha thresholded (>= 50% on, else off), styled
+// (shadow, outline, fill) from that hard mask, cached, and blitted at integer
+// coordinates. Press Start 2P is only used at multiples of 8px.
+const TEXT_CACHE_MAX = 600;
+const maskCache = new Map();   // size|string -> { c, w, h, pad }
+const styleCache = new Map();  // style key -> { c, pad, w }
+let fontEpoch = 0;
+if (typeof document !== 'undefined' && document.fonts) {
+  // anything cached before the font arrived used a fallback face: drop it
+  document.fonts.addEventListener?.('loadingdone', () => { maskCache.clear(); styleCache.clear(); fontEpoch++; });
+}
+function makeCanvas(w, h) {
+  const c = document.createElement('canvas');
+  c.width = Math.max(1, w); c.height = Math.max(1, h);
+  return c;
+}
+// Hard-edged glyph mask (white on transparent) for a string at a size.
+export function textMask(s, size) {
+  if (size % 8) console.warn(`text size ${size} is not a multiple of 8`);
+  const key = size + '|' + s;
+  let m = maskCache.get(key);
+  if (m) return m;
+  const pad = 2;
+  const probe = makeCanvas(1, 1).getContext('2d');
+  probe.font = `${size}px ${FONT}`;
+  const w = Math.max(1, Math.round(probe.measureText(s).width));
+  const h = size;
+  const c = makeCanvas(w + pad * 2, h + pad * 2);
+  const g = c.getContext('2d');
+  g.font = `${size}px ${FONT}`;
+  g.textAlign = 'left';
+  g.textBaseline = 'top';
+  g.fillStyle = '#fff';
+  g.fillText(s, pad, pad);
+  const img = g.getImageData(0, 0, c.width, c.height);
+  const d = img.data;
+  for (let i = 0; i < d.length; i += 4) {
+    const on = d[i + 3] >= 128;
+    d[i] = d[i + 1] = d[i + 2] = 255;
+    d[i + 3] = on ? 255 : 0;
+  }
+  g.putImageData(img, 0, 0);
+  m = { c, w, h, pad };
+  if (maskCache.size > TEXT_CACHE_MAX) maskCache.clear();
+  maskCache.set(key, m);
+  return m;
+}
+// The mask filled with a colour or pattern.
+function tinted(m, fill) {
+  const c = makeCanvas(m.c.width, m.c.height);
+  const g = c.getContext('2d');
+  g.drawImage(m.c, 0, 0);
+  g.globalCompositeOperation = 'source-in';
+  g.fillStyle = fill;
+  g.fillRect(0, 0, c.width, c.height);
+  return c;
+}
+// A fully styled, cached text bitmap. Returns { c, pad, w, h } where (pad, pad)
+// inside c is the top-left of the glyphs.
+export function textSprite(s, o = {}) {
+  const { size = 8, color = P.white, outline = null, ow = 1, shadow = null, sh = 2, fill = null } = o;
+  const fillKey = fill ? (fill.__key ?? (fill.__key = 'p' + Math.random())) : color;
+  const key = [size, s, fillKey, outline, ow, shadow, sh, fontEpoch].join('|');
+  let sp = styleCache.get(key);
+  if (sp) return sp;
+  const m = textMask(s, size);
+  const extra = Math.max(outline || shadow ? ow : 0, 0);
+  const pad = m.pad + extra;
+  const c = makeCanvas(m.c.width + extra * 2, m.c.height + extra * 2 + (shadow ? sh : 0));
+  const g = c.getContext('2d');
+  const at = (img, dx, dy) => g.drawImage(img, extra + dx, extra + dy);
+  if (shadow) { const t = tinted(m, shadow); for (let dx = -ow; dx <= ow; dx++) for (let dy = -ow; dy <= ow; dy++) at(t, dx, dy + sh); }
+  if (outline) { const t = tinted(m, outline); for (let dx = -ow; dx <= ow; dx++) for (let dy = -ow; dy <= ow; dy++) if (dx || dy) at(t, dx, dy); }
+  at(tinted(m, fill || color), 0, 0);
+  sp = { c, pad, w: m.w, h: m.h };
+  if (styleCache.size > TEXT_CACHE_MAX) styleCache.clear();
+  styleCache.set(key, sp);
+  return sp;
+}
 export function text(ctx, s, x, y, o = {}) {
-  const { size = 8, color = P.white, align = 'center', baseline = 'middle', outline = null, ow = 1, shadow = null, sh = 2, alpha = 1, fill = null } = o;
+  s = String(s);
+  if (!s) return;
+  const { align = 'center', baseline = 'middle', alpha = 1 } = o;
+  const sp = textSprite(s, o);
+  let left = Math.round(x), top = Math.round(y);
+  if (align === 'center') left -= Math.round(sp.w / 2);
+  else if (align === 'right') left -= sp.w;
+  if (baseline === 'middle') top -= Math.round(sp.h / 2);
+  else if (baseline === 'bottom' || baseline === 'alphabetic') top -= sp.h;
   ctx.save();
-  ctx.globalAlpha = alpha;
-  ctx.font = `${size}px ${FONT}`;
-  ctx.textAlign = align;
-  ctx.textBaseline = baseline;
-  x = Math.round(x); y = Math.round(y);
-  if (shadow) {
-    ctx.fillStyle = shadow;
-    for (let dx = -ow; dx <= ow; dx++) for (let dy = -ow; dy <= ow; dy++) ctx.fillText(s, x + dx, y + dy + sh);
-  }
-  if (outline) {
-    ctx.fillStyle = outline;
-    for (let dx = -ow; dx <= ow; dx++) for (let dy = -ow; dy <= ow; dy++) if (dx || dy) ctx.fillText(s, x + dx, y + dy);
-  }
-  ctx.fillStyle = fill || color;
-  ctx.fillText(s, x, y);
+  ctx.globalAlpha *= alpha;
+  ctx.imageSmoothingEnabled = false;
+  ctx.drawImage(sp.c, left - sp.pad, top - sp.pad);
   ctx.restore();
 }
 
@@ -340,6 +417,17 @@ export function initInput(canvas) {
 }
 
 /* ---------------------------------------------------- canvas + scaling */
+// Pixel art everywhere: no context ever smooths when blitting. (Setting a
+// canvas's width/height resets its context state, so force it at draw time.)
+if (typeof CanvasRenderingContext2D !== 'undefined' && !CanvasRenderingContext2D.prototype.__crisp) {
+  const drawImage = CanvasRenderingContext2D.prototype.drawImage;
+  CanvasRenderingContext2D.prototype.drawImage = function (...args) {
+    if (this.imageSmoothingEnabled) this.imageSmoothingEnabled = false;
+    return drawImage.apply(this, args);
+  };
+  CanvasRenderingContext2D.prototype.__crisp = true;
+}
+
 export function initCanvas(canvas) {
   canvas.width = W;
   canvas.height = H;
@@ -356,6 +444,7 @@ export function initCanvas(canvas) {
     const s = whole >= 1 && whole / fit >= 0.8 ? whole : fit;
     canvas.style.width = `${(W * s) / dpr}px`;
     canvas.style.height = `${(H * s) / dpr}px`;
+    ctx.imageSmoothingEnabled = false;
   };
   resize();
   window.addEventListener('resize', resize);

@@ -53,13 +53,13 @@ export class TransitionScene {
     ctx.rotate(swing);
     rect(ctx, -60, -90, 2, 70, P.ink); rect(ctx, 58, -90, 2, 70, P.ink);
     const label = this.meta.room;
-    const bw = Math.max(170, label.length * 12 + 44);
+    const bw = Math.max(170, label.length * 16 + 40);
     rect(ctx, -bw / 2 - 3, -23, bw + 6, 52, P.ink);
     stripeRect(ctx, -bw / 2, -20, bw, 46, P.pink1, P.pink4, 4, t * 10);
     rect(ctx, -bw / 2 + 5, -15, bw - 10, 36, P.cream);
     rect(ctx, -bw / 2 + 5, -15, bw - 10, 2, P.white);
-    text(ctx, label, 0, -2, { size: 12, color: P.choc1 });
-    text(ctx, `Level ${this.round}`, 0, 12, { size: 8, color: P.lilac1 });
+    text(ctx, label, 0, -3, { size: 16, color: P.choc1 });
+    text(ctx, `Level ${this.round}`, 0, 13, { size: 8, color: P.lilac1 });
     if (this.meta.boss) {
       ctx.rotate(-0.15);
       rect(ctx, bw / 2 - 40, 10, 52, 18, P.ink);
