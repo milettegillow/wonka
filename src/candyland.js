@@ -66,7 +66,7 @@ export function drawLollipop(ctx, x, y, r, cols, t = 0, o = {}) {
   const stick = o.stick ?? Math.round(r * 1.6);
   const hy = y - stick - r;
   ellipse(ctx, x + 3, y + 1, Math.max(3, r * 0.5), 2, 'rgba(60,30,80,0.22)');
-  caneStick(ctx, x - 1, hy + r - 2, y, r > 14 ? 4 : 3);
+  caneStick(ctx, x - 1, hy + r - 2, y, r > 24 ? 5 : r > 14 ? 4 : r > 7 ? 3 : 2);
   const sway = o.sway ? Math.round(Math.sin(t * 1.2 + x) * 1) : 0;
   ctx.drawImage(lolliHead(r, cols), Math.round(x - r - 1 + sway), Math.round(hy - r - 1));
   // a sparkle every so often
@@ -138,12 +138,28 @@ function gumdrop(g, cx, base, rx, ry, col, r) {
   }
 }
 
-// A peppermint swirl lying flat in the grass.
+/* ------------------------------------------------------- forced perspective */
+// Scale for a prop standing on the ground at screen y: small and distant on
+// the far bank, bigger the nearer it is to the camera (the bottom edge).
+const DEPTH = [[100, 0.42], [150, 0.55], [180, 0.75], [210, 0.85], [240, 1.05], [270, 1.3], [300, 1.45]];
+export function depth(y) {
+  if (y <= DEPTH[0][0]) return DEPTH[0][1];
+  for (let i = 1; i < DEPTH.length; i++) {
+    const [y1, s1] = DEPTH[i];
+    if (y <= y1) { const [y0, s0] = DEPTH[i - 1]; return s0 + ((y - y0) / (y1 - y0)) * (s1 - s0); }
+  }
+  return DEPTH[DEPTH.length - 1][1];
+}
+const sz = (n, s, min = 1) => Math.max(min, Math.round(n * s));
+const shadowAt = (g, x, y, rx, s) => ellipse(g, x + sz(3, s), y + 1, sz(rx, s, 2), Math.max(1, sz(2, s)), 'rgba(60,30,80,0.22)');
+
+// A peppermint swirl lying flat in the grass (r already scaled).
 function peppermint(g, cx, cy, r, col = P.red1) {
-  ellipse(g, cx, cy + 1, r + 1, r * 0.55 + 1, 'rgba(60,30,80,0.25)');
-  ellipse(g, cx, cy, r + 1, r * 0.55 + 1, P.ink);
-  for (let y = -Math.ceil(r * 0.55); y <= Math.ceil(r * 0.55); y++) for (let x = -r; x <= r; x++) {
-    const nx = x / r, ny = y / (r * 0.55);
+  const ry = Math.max(2, r * 0.55);
+  ellipse(g, cx, cy + 1, r + 1, ry + 1, 'rgba(60,30,80,0.25)');
+  ellipse(g, cx, cy, r + 1, ry + 1, P.ink);
+  for (let y = -Math.ceil(ry); y <= Math.ceil(ry); y++) for (let x = -r; x <= r; x++) {
+    const nx = x / r, ny = y / ry;
     if (nx * nx + ny * ny > 1) continue;
     const a = Math.atan2(ny, nx);
     g.fillStyle = Math.floor(((a / Math.PI + 1) * 4)) % 2 ? col : P.white;
@@ -152,59 +168,125 @@ function peppermint(g, cx, cy, r, col = P.red1) {
   g.fillStyle = P.white; g.fillRect(cx - 1, cy, 2, 1);
 }
 
-// A twist-wrapped sweet.
-function wrapped(g, cx, cy, col, col2) {
-  g.fillStyle = P.ink; g.fillRect(cx - 6, cy - 2, 13, 5); g.fillRect(cx - 3, cy - 3, 7, 7);
-  g.fillStyle = col2; g.fillRect(cx - 5, cy - 1, 2, 3); g.fillRect(cx + 4, cy - 1, 2, 3);
-  g.fillStyle = col; g.fillRect(cx - 2, cy - 2, 5, 5);
-  g.fillStyle = P.white; g.fillRect(cx - 1, cy - 1, 2, 1);
+// A twist-wrapped sweet at scale s.
+function wrapped(g, cx, cy, col, col2, s = 1) {
+  const b = sz(5, s, 3), e = sz(2, s), eh = sz(3, s, 2), hb = Math.floor(b / 2), he = Math.floor(eh / 2);
+  ellipse(g, cx + 1, cy + hb + 1, hb + e + 1, Math.max(1, sz(1, s)), 'rgba(60,30,80,0.18)');
+  g.fillStyle = P.ink;
+  g.fillRect(cx - hb - e - 1, cy - he - 1, b + e * 2 + 2, eh + 2);
+  g.fillRect(cx - hb - 1, cy - hb - 1, b + 2, b + 2);
+  g.fillStyle = col2; g.fillRect(cx - hb - e, cy - he, e, eh); g.fillRect(cx - hb + b, cy - he, e, eh);
+  g.fillStyle = col; g.fillRect(cx - hb, cy - hb, b, b);
+  g.fillStyle = P.white; g.fillRect(cx - hb + 1, cy - hb + 1, Math.max(1, Math.floor(b / 2)), 1);
 }
 
-// Candy-cane fence: posts with pastel rails.
-function fence(g, x0, x1, y) {
-  for (let x = x0; x <= x1; x += 12) {
-    g.fillStyle = P.ink; g.fillRect(x - 1, y - 13, 5, 14);
-    for (let k = 0; k < 13; k++) { g.fillStyle = Math.floor(k / 2) % 2 ? P.pink1 : P.white; g.fillRect(x, y - 12 + k, 3, 1); }
-    g.fillStyle = P.ink; g.fillRect(x - 1, y - 15, 5, 3); g.fillStyle = P.pink2; g.fillRect(x, y - 14, 3, 1);
+// Candy-cane fence at scale s, standing on y.
+function fence(g, x0, x1, y, s = 1) {
+  const step = sz(12, s, 5), ph = sz(13, s, 5), pw = sz(3, s, 2);
+  for (let x = x0; x <= x1; x += step) {
+    g.fillStyle = P.ink; g.fillRect(x - 1, y - ph, pw + 2, ph + 1);
+    for (let k = 0; k < ph - 1; k++) { g.fillStyle = Math.floor(k / sz(2, s)) % 2 ? P.pink1 : P.white; g.fillRect(x, y - ph + 1 + k, pw, 1); }
+    g.fillStyle = P.ink; g.fillRect(x - 1, y - ph - 2, pw + 2, 3); g.fillStyle = P.pink2; g.fillRect(x, y - ph - 1, pw, 1);
   }
-  for (const ry of [y - 10, y - 5]) {
-    g.fillStyle = P.ink; g.fillRect(x0, ry - 1, x1 - x0 + 3, 4);
-    for (let x = x0; x < x1 + 3; x++) { g.fillStyle = Math.floor((x - x0) / 3) % 2 ? P.lilac2 : P.white; g.fillRect(x, ry, 1, 2); }
+  const rh = sz(2, s);
+  for (const ry of [y - Math.round(ph * 0.75), y - Math.round(ph * 0.38)]) {
+    g.fillStyle = P.ink; g.fillRect(x0, ry - 1, x1 - x0 + pw, rh + 2);
+    for (let x = x0; x < x1 + pw; x++) { g.fillStyle = Math.floor((x - x0) / sz(3, s)) % 2 ? P.lilac2 : P.white; g.fillRect(x, ry, 1, rh); }
   }
 }
 
-// Ice-cream-cone tree: waffle trunk, stacked scoops, a cherry.
-function coneTree(g, x, y, scoops) {
-  ellipse(g, x + 3, y + 1, 8, 2, 'rgba(60,30,80,0.22)');
-  for (let yy = 0; yy < 22; yy++) {
-    const hw = Math.max(1, Math.round(1 + (22 - yy) * 0.28));
+// Ice-cream-cone tree at scale s: waffle trunk, stacked scoops, a cherry.
+function coneTree(g, x, y, scoops, s = 1) {
+  shadowAt(g, x, y, 8, s);
+  const ch = sz(22, s, 8);
+  for (let yy = 0; yy < ch; yy++) {
+    const hw = Math.max(1, Math.round((1 + (ch - yy) * 0.28)));
     g.fillStyle = P.ink; g.fillRect(x - hw - 1, y - yy, hw * 2 + 2, 1);
     for (let xx = -hw; xx < hw; xx++) { g.fillStyle = (xx + yy) % 4 === 0 || (xx - yy + 40) % 4 === 0 ? P.caramel : P.caramel2; g.fillRect(x + xx, y - yy, 1, 1); }
   }
-  let sy = y - 24;
+  let sy = y - ch - sz(2, s);
   scoops.forEach((col, i) => {
-    const r = 9 - i * 1.5;
+    const r = Math.max(2, (9 - i * 1.5) * s);
     ellipse(g, x, sy, r + 1, r * 0.85 + 1, P.ink);
     ellipse(g, x, sy, r, r * 0.85, col);
-    ellipse(g, x - 2, sy - 2, r * 0.45, r * 0.3, mix(col, P.white, 0.5));
-    g.fillStyle = mix(col, P.ink, 0.15); // drip
-    g.fillRect(x + r * 0.3, sy + r * 0.6, 2, 3);
+    ellipse(g, x - sz(2, s), sy - sz(2, s), r * 0.45, r * 0.3, mix(col, P.white, 0.5));
+    g.fillStyle = mix(col, P.ink, 0.15);
+    g.fillRect(Math.round(x + r * 0.3), Math.round(sy + r * 0.6), sz(2, s), sz(3, s));
     sy -= r * 1.3;
   });
-  circle(g, x + 1, sy + 4, 3, P.ink); circle(g, x + 1, sy + 4, 2, P.red1); g.fillStyle = P.white; g.fillRect(x, sy + 3, 1, 1);
-  g.fillStyle = P.wood0; g.fillRect(x + 2, sy - 1, 1, 3);
+  const cr = sz(2, s);
+  circle(g, x + 1, sy + cr + 1, cr + 1, P.ink); circle(g, x + 1, sy + cr + 1, cr, P.red1); g.fillStyle = P.white; g.fillRect(x, sy + cr, 1, 1);
 }
 
-// Cotton-candy tree: a pink fluff on a stick.
-function flossTree(g, x, y, col, col2, s = 1) {
-  ellipse(g, x + 3, y + 1, 7, 2, 'rgba(60,30,80,0.22)');
-  g.fillStyle = P.ink; g.fillRect(x - 2, y - 22 * s, 4, 22 * s);
-  g.fillStyle = P.cream; g.fillRect(x - 1, y - 22 * s, 2, 22 * s);
-  const cy = y - 26 * s;
-  for (const [ox, oy, r] of [[-7, 2, 8], [6, 2, 8], [0, -4, 10], [-3, 5, 7], [4, 6, 7]]) ellipse(g, x + ox * s, cy + oy * s, r * s + 1, r * s * 0.85 + 1, mix(col2, P.ink, 0.3));
-  for (const [ox, oy, r] of [[-7, 2, 8], [6, 2, 8], [0, -4, 10], [-3, 5, 7], [4, 6, 7]]) ellipse(g, x + ox * s, cy + oy * s, r * s, r * s * 0.85, col2);
-  for (const [ox, oy, r] of [[-7, 1, 6], [5, 0, 6], [-1, -6, 7]]) ellipse(g, x + ox * s, cy + oy * s, r * s * 0.8, r * s * 0.6, col);
-  g.fillStyle = P.white; g.fillRect(x - 6 * s, cy - 6 * s, 3, 1); g.fillRect(x - 2 * s, cy - 10 * s, 2, 1);
+// A stack of sugared gumdrops (bottom on y) at scale s.
+export function gumdropStack(g, x, y, s, cols) {
+  let cy = y;
+  cols.forEach((col, i) => {
+    const rx = (10 - i) * s, ry = (9 - i * 0.5) * s;
+    cy -= ry * (i ? 1.55 : 1);
+    ellipse(g, x, cy + 1, rx + 1, ry + 1, P.ink);
+    ellipse(g, x, cy, rx, ry, col);
+    ellipse(g, x - 1, cy - ry * 0.3, rx * 0.6, ry * 0.45, mix(col, P.white, 0.45));
+    g.fillStyle = P.white; g.fillRect(Math.round(x - rx * 0.45), Math.round(cy - ry * 0.55), sz(2, s), 1);
+  });
+}
+
+/* --------------------------------------------------------------- props */
+// Lollipops are drawn live (they sparkle) in depth order with the board, boat
+// and Wonka. Base sizes are at scale 1; depth(y) scales them.
+export const LOLLIPOPS = [
+  { x: 122, y: 134, r: 14, c: 'blue' },
+  { x: 82, y: 148, r: 18, c: 'berry' },
+  { x: 16, y: 296, r: 22, c: 'pink' },
+  { x: 118, y: 284, r: 14, c: 'blue' },
+  { x: 236, y: 302, r: 13, c: 'berry' },
+  { x: 334, y: 292, r: 18, c: 'lilac' },
+];
+export function drawLollipops(ctx, t, y0, y1) {
+  for (const l of LOLLIPOPS) {
+    if (l.y < y0 || l.y >= y1) continue;
+    const s = depth(l.y);
+    drawLollipop(ctx, l.x, l.y, Math.round(l.r * s), LOLLI[l.c], t, { stick: Math.round(l.r * 1.6 * s), sway: true });
+  }
+}
+// Is (x, y) under a lollipop's head or stick? (keeps flat props out from under them)
+function underLollipop(x, y) {
+  return LOLLIPOPS.some((l) => {
+    const s = depth(l.y), r = l.r * s, hy = l.y - l.r * 1.6 * s - r;
+    return Math.hypot(x - l.x, y - hy) < r + 4 || (Math.abs(x - l.x) < 5 && y > hy && y < l.y + 3);
+  });
+}
+
+// Everything else is baked into the background, sorted far to near.
+const PROPS = [
+  { k: 'fence', x0: 28, x1: 92, y: 146 },
+  { k: 'fence', x0: 300, x1: 374, y: 147 },
+  { k: 'cone', x: 104, y: 143, scoops: [P.pink2, P.mint2] },
+  { k: 'cone', x: 470, y: 142, scoops: [SKY.b1, P.lilac2] },
+  { k: 'pepper', x: 66, y: 130, r: 10 },
+  { k: 'pepper', x: 446, y: 128, r: 9, col: P.pink1 },
+  { k: 'sweet', x: 98, y: 126, c: [P.lilac1, P.lilac3] },
+  { k: 'sweet', x: 400, y: 130, c: [SKY.b0, SKY.b2] },
+  { k: 'sweet', x: 30, y: 122, c: [P.pink1, P.pink3] },
+  { k: 'pepper', x: 372, y: 226, r: 6, col: SKY.b0 },
+  { k: 'sweet', x: 92, y: 222, c: [P.pink1, P.pink3] },
+  { k: 'sweet', x: 212, y: 226, c: [P.mint0, P.mint2] },
+  { k: 'sweet', x: 470, y: 222, c: [P.mint0, P.mint3] },
+  { k: 'sweet', x: 162, y: 236, c: [SKY.b0, SKY.b2] },
+  { k: 'sweet', x: 290, y: 240, c: [P.red1, P.pink3] },
+  { k: 'pepper', x: 52, y: 238, r: 6 },
+  { k: 'sweet', x: 186, y: 256, c: [P.lilac1, P.lilac3] },
+  { k: 'pepper', x: 196, y: 266, r: 6, col: P.pink1 },
+  { k: 'sweet', x: 268, y: 262, c: [P.pink1, LEMON] },
+  { k: 'sweet', x: 70, y: 266, c: [P.mint0, P.mint2] },
+].sort((a, b) => a.y - b.y);
+
+function drawProp(g, pr) {
+  const s = depth(pr.y);
+  if (pr.k === 'fence') fence(g, pr.x0, pr.x1, pr.y, s);
+  else if (pr.k === 'cone') coneTree(g, pr.x, pr.y, pr.scoops, s);
+  else if (pr.k === 'pepper') peppermint(g, pr.x, pr.y, Math.max(3, Math.round(pr.r * s)), pr.col);
+  else if (pr.k === 'sweet') wrapped(g, pr.x, pr.y, pr.c[0], pr.c[1], s);
 }
 
 const SPRINKLES = [P.pink1, P.lilac1, SKY.b0, P.mint0, P.red2, P.lemon0, P.white];
@@ -248,32 +330,26 @@ export function candyBackground(calm) {
     g.fillStyle = P.caramel2; g.fillRect(x, b1 + 1, 1, 1);
     g.fillStyle = P.grass0; g.fillRect(x, b1 + 3, 1, 1);
   }
-  // sprinkles everywhere on the grass, thinner near the middle
-  for (let i = 0; i < 1500; i++) {
-    const x = Math.floor(r() * W), y = 108 + Math.floor(r() * (H - 108));
-    if (y > bankTop(x) - 4 && y < bankBot(x) + 5) continue;
-    if (calm(x, y) && r() < 0.75) continue;
+  // sprinkles: tiny and dense on the far bank; on the near bank they grow
+  // toward the camera and thin out
+  const sprinkle = (x, y, len, th) => {
+    if (y > bankTop(x) - 4 && y < bankBot(x) + 5) return;
+    if (calm(x, y) && r() < 0.75) return;
     g.fillStyle = SPRINKLES[Math.floor(r() * SPRINKLES.length)];
-    if (r() < 0.5) g.fillRect(x, y, 2, 1); else g.fillRect(x, y, 1, 2);
+    if (r() < 0.5) g.fillRect(x, y, len, th); else g.fillRect(x, y, th, len);
+  };
+  for (let i = 0; i < 900; i++) {
+    const x = Math.floor(r() * W), y = 108 + Math.floor(r() * (RIVER_T - 104));
+    sprinkle(x, y, r() < 0.6 ? 1 : 2, 1);
   }
-  // far-bank props (edges only)
-  fence(g, 30, 90, 146);
-  fence(g, 300, 372, 147);
-  coneTree(g, 116, 140, [P.pink2, P.mint2]);
-  flossTree(g, 330, 136, P.pink3, P.pink2, 0.9);
-  coneTree(g, 466, 142, [SKY.b1, P.lilac2]);
-  peppermint(g, 74, 128, 6);
-  peppermint(g, 452, 126, 5, P.pink1);
-  wrapped(g, 100, 124, P.lilac1, P.lilac3);
-  wrapped(g, 356, 128, SKY.b0, SKY.b2);
-  // near-bank props
-  fence(g, 230, 300, 232);
-  peppermint(g, 24, 262, 9);
-  peppermint(g, 196, 258, 7, P.pink1);
-  peppermint(g, 344, 230, 6, SKY.b0);
-  flossTree(g, 160, 246, P.lilac3, P.lilac2, 0.85);
-  const sweets = [[94, 226, P.pink1, P.pink3], [138, 262, SKY.b0, SKY.b2], [212, 234, P.mint0, P.mint2], [258, 262, P.red1, P.pink3], [316, 262, P.lilac1, P.lilac3], [356, 252, P.pink1, LEMON], [12, 224, P.lilac1, P.pink3], [470, 222, P.mint0, P.mint3]];
-  for (const [x, y, a, b] of sweets) wrapped(g, x, y, a, b);
+  for (let i = 0; i < 1100; i++) {
+    const x = Math.floor(r() * W), y = RIVER_B + 2 + Math.floor(Math.pow(r(), 1.7) * (H - RIVER_B));
+    const s = depth(y);
+    if (r() > 0.45 + 0.55 / s / s) continue; // fewer, bigger ones near the bottom
+    sprinkle(x, y, Math.max(2, Math.round(2.2 * s)), s > 1.1 ? 2 : 1);
+  }
+  // props, far to near
+  for (const pr of PROPS) if (!(pr.k !== 'fence' && underLollipop(pr.x, pr.y))) drawProp(g, pr);
   bgCache = c;
   return c;
 }
@@ -302,7 +378,8 @@ export function drawWaterfall(ctx, t) {
     ellipse(ctx, x - 2, y - ry * 0.3, rx * 0.6, ry * 0.45, mix(col, P.white, 0.45));
     rect(ctx, x - rx * 0.45, y - ry * 0.55, 3, 1, P.white);
   };
-  for (const r of [[50, 84, 10, 12, P.pink2], [54, 108, 9, 11, P.lilac1], [52, 132, 9, 10, P.pink2], [56, 150, 8, 7, P.lilac2]]) rock(...r);
+  // a little stack of sugared gumdrops beside the falls, far away
+  gumdropStack(ctx, 52, 152, depth(152), [P.lilac2, P.pink2, P.lilac1, P.pink2]);
   // the falling sheet: wide, glossy milk chocolate pouring off the left edge
   for (let y = top; y < bot; y++) {
     const r = R(y);

@@ -11,7 +11,7 @@ import { helloQuip } from '../quips.js';
 import { drawHead } from '../faces.js';
 import { GAMES } from '../games/index.js';
 import { FULL_NAMES, nameParts } from '../names.js';
-import { candyBackground, drawClouds, drawRiverLife, drawWaterfall, drawLollipop, LOLLI } from '../candyland.js';
+import { candyBackground, drawClouds, drawRiverLife, drawWaterfall, drawLollipop, drawLollipops, RIVER_T } from '../candyland.js';
 
 const GAMES_META = Object.fromEntries(Object.entries(GAMES).map(([id, G]) => [id, G.meta]));
 
@@ -70,12 +70,6 @@ const KC = { w: 110, h: 110, ox: 55, oy: 104 }; // offscreen kid sprite canvas +
 const WONKA = { x: 434, y: 262, s: 1.8 };
 const WC = { w: 96, h: 112, ox: 48, oy: 106 };  // offscreen Wonka sprite canvas + origin (feet)
 const BOARD = { x: 300, y: 58, w: 96, h: 72 };
-const LOLLIPOPS = [
-  { x: 80, y: 148, r: 12, c: 'berry' },
-  { x: 52, y: 266, r: 22, c: 'pink', stick: 18 },
-  { x: 300, y: 268, r: 16, c: 'lilac', stick: 22 },
-  { x: 176, y: 268, r: 11, c: 'blue', stick: 16 },
-];
 // Keep the busy stuff away from the boat and kids.
 const calm = (x, y) => x > BOAT.x - BOAT.hw - 20 && x < BOAT.x + BOAT.hw + 20 && y > 100 && y < 215;
 
@@ -478,8 +472,11 @@ export class MenuScene {
     drawClouds(ctx, t);
     drawRiverLife(ctx, t, (x, y) => Math.abs(x - this.boatX()) < BOAT.hw - 6 && y < this.boatY() + BOAT.h);
     drawWaterfall(ctx, t);
-    for (const l of LOLLIPOPS.filter((l) => l.y < 200)) drawLollipop(ctx, l.x, l.y, l.r, LOLLI[l.c], t, { stick: l.stick, sway: true });
+    // far bank, sorted by depth: props behind the scoreboard, the board, the rest
+    const boardGround = BOARD.y + BOARD.h + 18;
+    drawLollipops(ctx, t, -Infinity, boardGround);
     this.drawBoard(ctx, t);
+    drawLollipops(ctx, t, boardGround, RIVER_T + 30);
 
     // the boat, its wake, and the five kids standing in it
     const bx = Math.round(this.boatX()), by = this.boatY();
@@ -494,12 +491,14 @@ export class MenuScene {
     drawHull(ctx, bx, by, t, this.hover === 'tour');
     rect(ctx, bx - BOAT.hw * 0.62, by + BOAT.h + 1, BOAT.hw * 1.24, 1, P.choc1);
 
-    for (const l of LOLLIPOPS.filter((l) => l.y >= 200)) drawLollipop(ctx, l.x, l.y, l.r, LOLLI[l.c], t, { stick: l.stick, sway: true });
+    drawLollipops(ctx, t, RIVER_T + 30, WONKA.y);
 
     // Wonka on the right bank, by his scoreboard
     this.drawWonka(ctx, t);
+    drawLollipops(ctx, t, WONKA.y, Infinity);
     if (t > 0.4 && t < 4.2 && !this.card) {
-      drawBubble(ctx, 402, 132, this.hello, { align: 'right', shown: Math.floor((t - 0.4) * 30), maxChars: 18, tailX: 386, tailDir: 1 });
+      // above the boat's right end, clear of the kids' heads
+      drawBubble(ctx, 404, 110, this.hello, { align: 'right', shown: Math.floor((t - 0.4) * 30), maxChars: 18, tailX: 388, tailDir: 1, scale: 0.8 });
     }
     drawLogo(ctx, 402, 22, t, 16);
 
